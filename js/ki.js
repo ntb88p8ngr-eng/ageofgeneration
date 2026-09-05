@@ -24,10 +24,10 @@ const STUFEN = {
 
 /* Wieviel Anteil jedes Rohstoffs im jeweiligen Zeitalter gewuenscht ist. */
 const VERTEILUNG = [
-  { nahrung: 60, holz: 40, gold: 0,  stein: 0 },
-  { nahrung: 42, holz: 33, gold: 20, stein: 5 },
-  { nahrung: 36, holz: 30, gold: 24, stein: 10 },
-  { nahrung: 34, holz: 28, gold: 28, stein: 10 }
+  { nahrung: 65, holz: 35, gold: 0,  stein: 0 },
+  { nahrung: 46, holz: 30, gold: 19, stein: 5 },
+  { nahrung: 40, holz: 28, gold: 22, stein: 10 },
+  { nahrung: 38, holz: 26, gold: 26, stein: 10 }
 ];
 
 export const KI = {
@@ -104,11 +104,49 @@ function wirtschaft(sim, p, z) {
 
   for (const e of untaetig) schickeSammeln(sim, p, e, knapp);
 
-  /* Umverteilen: hoechstens einer je Denkrunde, damit es ruhig bleibt. */
-  if (z.zaehler % 30 === 0 && arbeitend > 6) {
+  /* Wachhund: Wenn die Nahrung stockt, obwohl Aecker voll dastehen,
+     stimmt etwas nicht — ein verbauter Weg, eine erschoepfte Quelle,
+     eine Kette ungluecklicher Befehle. Dann werden Leute unmittelbar
+     auf den naechsten Acker gesetzt, statt weiter zu rechnen. */
+  if (z.zaehler % 12 === 0) {
+    const jetzt = p.statistik.gesammelt.nahrung;
+    /* Nur wenn wirklich gar nichts mehr hereinkommt — sonst reisst der
+       Wachhund gut arbeitende Leute von ihrer Quelle weg. */
+    const stockt = z.letzteNahrung != null && jetzt - z.letzteNahrung < 4;
+    z.letzteNahrung = jetzt;
+    if (stockt && p.rohstoffe.nahrung < 600) {
+      const aecker = meineGebaeude(sim, p, 'farm').filter(b => b.fertig && b.vorrat > 0);
+      if (aecker.length) {
+        const helfer = dorf.filter(e => e.zustand !== 4 && e.ladungArt === 'nahrung').slice(0, 3);
+        helfer.forEach((e, i) => {
+          const acker = aecker[i % aecker.length];
+          befehl(sim, p, { a: 'sammeln', ids: [e.id], ziel: acker.id });
+        });
+      }
+    }
+  }
+
+  /* Wer weit laeuft, arbeitet kaum. Ein Dorfbewohner, dessen
+     Ablieferweg zu lang geworden ist — die Beeren am Kartenrand sind
+     abgeerntet, die Farmen daheim stehen leer —, bekommt eine naehere
+     Quelle. Einer je Denkrunde, damit kein Wanderzirkus entsteht. */
+  if (z.zaehler % 12 === 0) {
+    for (const e of dorf) {
+      if (e.zustand === 0 || e.zustand === 4 || !e.ladungArt) continue;
+      if (abgabeWeg(sim, p, e) <= 13) continue;
+      schickeSammeln(sim, p, e, e.ladungArt);
+      break;
+    }
+  }
+
+  /* Umverteilen: liegt die Verteilung schief, wandern bis zu zwei
+     Leute um. Wer baut, bleibt in Ruhe. */
+  if (arbeitend > 5) {
     const zuviel = ueberschussRohstoff(sim, p, ist, arbeitend, soll);
     if (zuviel && zuviel !== knapp) {
-      const kandidat = dorf.find(e => e.ladungArt === zuviel && e.zustand !== 0);
+      /* Am liebsten jemanden mit leeren Haenden — der verliert keine Zeit. */
+      const frei = dorf.filter(e => e.ladungArt === zuviel && e.zustand !== 0 && e.zustand !== 4 && e.ladung === 0);
+      const kandidat = frei[0] || dorf.find(e => e.ladungArt === zuviel && e.zustand !== 0 && e.zustand !== 4);
       if (kandidat) schickeSammeln(sim, p, kandidat, knapp);
     }
   }
@@ -120,9 +158,12 @@ function knappsterRohstoff(sim, p, ist, arbeitend, soll) {
     if (!soll[r]) continue;
     const anteil = arbeitend ? ist[r] * 100 / arbeitend : 0;
     let wert = soll[r] - anteil;
-    /* Vorratslage einbeziehen: was fast alle ist, wird dringender. */
-    if (p.rohstoffe[r] < 150) wert += 25;
-    if (p.rohstoffe[r] > 900) wert -= 30;
+    /* Vorratslage einbeziehen: was knapp wird, ist dringend; was sich
+       tuermt, kann warten. Ohne das haeuft der Rechner Holz an,
+       waehrend die Nahrung fuer das naechste Zeitalter fehlt. */
+    const vorrat = p.rohstoffe[r];
+    wert += Math.max(0, (300 - vorrat) / 10);
+    wert -= Math.max(0, (vorrat - 450) / 18);
     if (r === 'stein' && zahlGebaeude(sim, p, 'burg', true) > 0 && p.rohstoffe.stein > 200) wert -= 40;
     if (wert > besterWert) { besterWert = wert; besteArt = r; }
   }
@@ -134,7 +175,7 @@ function ueberschussRohstoff(sim, p, ist, arbeitend, soll) {
   for (const r of ROHSTOFFE) {
     const anteil = arbeitend ? ist[r] * 100 / arbeitend : 0;
     const d = anteil - (soll[r] || 0);
-    if (d > wert + 10) { wert = d; art = r; }
+    if (d > 8 && d > wert) { wert = d; art = r; }
   }
   return art;
 }
@@ -187,8 +228,11 @@ function schickeSammeln(sim, p, e, rohstoff) {
   /* Farmen zaehlen als Quelle — und sind meist die beste. */
   if (rohstoff === 'nahrung') {
     for (const b of sim.gebaeude) {
-      if (b.tot || b.spieler !== p.id || !b.fertig || !GEBAEUDE[b.typ].acker) continue;
+      if (b.tot || b.spieler !== p.id || !GEBAEUDE[b.typ].acker) continue;
       if (b.vorrat <= 0) continue;
+      /* Auch eine Baustelle zaehlt: der Bewohner baut sie fertig und
+         erntet danach — das ist besser, als quer ueber die Karte zu
+         laufen. Nur schon abgeerntete Aecker sind uninteressant. */
       /* Nicht zu sechst auf einen Acker. */
       let schon = 0;
       for (const o of sim.einheiten) if (!o.tot && o.spieler === p.id && o.zielId === b.id) schon++;
@@ -235,6 +279,20 @@ function schickeSammelnEinfach(sim, p, e, rohstoff) {
   return true;
 }
 
+/** Wie weit hat es dieser Dorfbewohner bis zur naechsten Abgabe? */
+function abgabeWeg(sim, p, e) {
+  const kx = (e.x / FP) | 0, ky = (e.y / FP) | 0;
+  let best = 99;
+  for (const b of sim.gebaeude) {
+    if (b.tot || b.spieler !== p.id || !b.fertig) continue;
+    const def = GEBAEUDE[b.typ];
+    if (!def.abgabe || def.abgabe.indexOf(e.ladungArt) < 0) continue;
+    const d = kachelAbstand(kx, ky, (b.x / FP) | 0, (b.y / FP) | 0);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 /** Achteck-Abstand in Kacheln — reicht fuer Vergleiche und ist ganzzahlig. */
 function kachelAbstand(x0, y0, x1, y1) {
   const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
@@ -252,7 +310,12 @@ function bauen(sim, p, z) {
      Baustelle trotz mehrerer Anlaeufe nicht voran, wird sie abgerissen —
      sonst haengt der ganze Bauplan an einer Ruine. */
   if (!z.baustellen) z.baustellen = {};
-  const baustelle = meineGebaeude(sim, p).find(b => !b.fertig && b.bauer === 0);
+  /* „Haengengeblieben“ ist eine Baustelle nur, wenn ueberhaupt niemand
+     mehr hinlaeuft. Wer noch unterwegs ist, zaehlt als Bauarbeiter —
+     sonst reisst die KI ihre eigenen Farmen wieder ab, bevor der
+     Erste angekommen ist. */
+  const unterwegs = (b) => sim.einheiten.some(e => !e.tot && e.spieler === p.id && e.bauId === b.id);
+  const baustelle = meineGebaeude(sim, p).find(b => !b.fertig && b.bauer === 0 && !unterwegs(b));
   if (baustelle) {
     const merk = z.baustellen[baustelle.id] || { versuche: 0, stand: -1 };
     if (merk.stand === baustelle.bauFortschritt) merk.versuche++;
@@ -279,15 +342,17 @@ function bauen(sim, p, z) {
     if (bauAuftrag(sim, p, 'haus', dorf.slice(0, 2))) { z.letzterBau = sim.takt; return; }
   }
   /* 2. Wirtschaft */
-  if (zahlGebaeude(sim, p, 'muehle', true) === 0 && p.rohstoffe.holz >= 100) {
+  if (zahlGebaeude(sim, p, 'muehle', true) < (p.zeitalter >= 2 ? 2 : 1) && p.rohstoffe.holz >= 100) {
     if (bauAuftrag(sim, p, 'muehle', dorf.slice(0, 2))) { z.letzterBau = sim.takt; return; }
   }
-  if (zahlGebaeude(sim, p, 'lager', true) < (p.zeitalter >= 1 ? 2 : 1) && p.rohstoffe.holz >= 100) {
+  /* Lager sind die halbe Wirtschaft: jeder Schritt weniger zum
+     Abliefern zaehlt bei jedem Gang. Deshalb ruhig mehrere. */
+  if (zahlGebaeude(sim, p, 'lager', true) < 2 + p.zeitalter && p.rohstoffe.holz >= 100) {
     if (bauAuftrag(sim, p, 'lager', dorf.slice(0, 2))) { z.letzterBau = sim.takt; return; }
   }
   /* 3. Farmen, sobald die Muehle steht und Nahrung knapp wird. */
   const farmen = zahlGebaeude(sim, p, 'farm', true);
-  let farmZiel = [2, 5, 8, 10][p.zeitalter];
+  let farmZiel = [4, 9, 13, 15][p.zeitalter];
   /* Wenn die Nahrung ausgeht, wird gepflanzt statt gespart. */
   if (p.rohstoffe.nahrung < 200 && p.rohstoffe.holz > 300) farmZiel += 4;
   if (zahlGebaeude(sim, p, 'muehle', false) > 0 && farmen < farmZiel && p.rohstoffe.holz >= 120) {
@@ -390,31 +455,37 @@ function ausbilden(sim, p, z) {
   const ziel = z.s.dorfZiel[p.zeitalter];
   const raum = Math.min(p.bevRaum, p.bevGrenze);
 
-  /* Fuer den Zeitalteraufstieg wird gespart. Wer immer weiter
-     Dorfbewohner baut, kommt nie in die naechste Zeit — das ist
-     der haeufigste Anfaengerfehler und der Rechner macht ihn nicht. */
+  /* Will die KI ins naechste Zeitalter? Dann wird der Beutel geschont.
+     Wichtig ist die Reihenfolge: Erst der Entschluss, dann das Sparen —
+     nicht umgekehrt. Wer erst spart, wenn schon fast alles beisammen
+     ist, gibt vorher jede Muenze fuer Soldaten aus und kommt nie an. */
   const naechstes = aufstiegKosten(p.zeitalter, p.volk);
-  let sparen = false;
-  if (naechstes && !p.aufstieg && dorfZahl >= Math.round(ziel * 0.7)) {
-    for (const r of ROHSTOFFE) {
-      if (naechstes[r] && p.rohstoffe[r] < naechstes[r] + 100) { sparen = true; break; }
-    }
-  }
+  const willAufsteigen = !!naechstes && !p.aufstieg && dorfZahl >= Math.round(ziel * 0.55);
+  z.spart = willAufsteigen;
 
-  /* Dorfbewohner haben Vorrang, solange das Ziel nicht steht. */
+  /* Dorfbewohner zahlen sich immer aus — beim Sparen nur etwas
+     zurueckhaltender, damit die Nahrung nicht komplett draufgeht. */
+  const dorfGrenze = willAufsteigen ? Math.round(ziel * 0.8) : ziel;
   for (const tc of meineGebaeude(sim, p, 'dorfzentrum')) {
     if (!tc.fertig || tc.warteschlange.length >= 3) continue;
-    if (dorfZahl >= ziel || p.bev >= raum) break;
-    if (sparen && dorfZahl >= Math.round(ziel * 0.7)) break;
+    if (dorfZahl >= dorfGrenze || p.bev >= raum) break;
     befehl(sim, p, { a: 'ausbilden', g: tc.id, typ: 'dorfbewohner', anzahl: 1 });
   }
 
   if (p.zeitalter < 1) return;
   if (p.bev >= raum - 1) return;
-  /* Waehrend gespart wird, laeuft die Kaserne nur auf halber Kraft. */
-  if (sparen && z.zaehler % 12 !== 0) return;
 
-  /* Militaer aus allen Kasernen, Staellen und Schuetzenstaenden. */
+  const armeeJetzt = meineEinheiten(sim, p, e => {
+    const w = sim.werte(p.id, e.typ);
+    return w.schaden > 0 && !w.kannSammeln;
+  }).length;
+  /* Ein kleiner Kern zur Verteidigung wird immer gehalten. Alles
+     darueber wartet, bis das Zeitalter steht. */
+  const kern = Math.min(z.s.armee[p.zeitalter], 8);
+  if (willAufsteigen && armeeJetzt >= kern) return;
+  const armeeGrenze = z.s.armee[p.zeitalter] + z.welle * 4 + 6;
+  if (armeeJetzt >= armeeGrenze) return;
+
   const wunsch = truppenwunsch(sim, p);
   for (const b of sim.gebaeude) {
     if (b.tot || b.spieler !== p.id || !b.fertig) continue;
@@ -454,6 +525,8 @@ function forschen(sim, p, z) {
     }
   }
   if (sim.zufall.bis(100) > z.s.techEifer * 100) return;
+  /* Wer fuer das Zeitalter spart, forscht nicht nebenbei die Kasse leer. */
+  if (z.spart) return;
 
   /* Wirtschafts- und Kampftechnologien, wenn Vorrat da ist. */
   const reihenfolge = ['schubkarre', 'manatarme', 'schmiede1', 'ruestung1', 'handkarre', 'pflug',

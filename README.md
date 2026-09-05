@@ -154,18 +154,24 @@ erhalten). Der Ordner `daten/` wird nie ausgeliefert.
 node --test test/*.test.js
 ```
 
-42 Tests: Zufall und Wurzel, Kartenerzeugung samt Erreichbarkeit aller
+43 Tests: Zufall und Wurzel, Kartenerzeugung samt Erreichbarkeit aller
 Startplaetze, Wegsuche, Volksboni, Aufstellung, Ernte, Bau, Ausbildung,
 Bevoelkerungsgrenze, Kampf mit Bonusschaden, Zeitalteraufstieg, Sicht,
 Siegbedingung, Markt, Rechteschutz (niemand befiehlt fremde Einheiten) sowie
 Warteraum, Rundenrelais, Zuschauerrechte und Aufzeichnungen des Servers.
+Dazu die Rueckkehr an die Arbeit nach getanem Bau.
 Dazu die wichtigste Probe: zwei Simulationen mit denselben Befehlen ergeben
-ueber neunhundert Runden dieselbe Pruefsumme.
+ueber neunhundert Runden dieselbe Pruefsumme. Gegengeprueft wurde ausserdem
+ueber die Laufzeitgrenze hinweg — dieselbe Aufzeichnung, einmal in Node und
+einmal in Chromium gerechnet, ergibt Zeichen fuer Zeichen dieselbe
+Pruefsumme. Genau davon lebt der Mehrspieler.
 
 ## Grenzen
 
 * Kein Wasserkrieg: es gibt keine Schiffe und keinen Hafen, Wasser ist Hindernis.
 * Einheiten koennen sich nicht in Gebaeude zurueckziehen.
-* Die KI spielt ordentlich Wirtschaft und schickt Angriffswellen, aber sie
-  belagert nicht planvoll und mauert nicht.
+* Die KI spielt eine ordentliche, aber gemaechliche Wirtschaft: Feudalzeit
+  nach etwa vierzehn Minuten, die Ritterzeit erreicht sie nur auf guten
+  Karten. Sie schickt Angriffswellen, belagert aber nicht planvoll und
+  baut keine Mauern. Gegen einen geuebten Menschen verliert sie.
 * Handel gibt es nur ueber den Markt, nicht mit Handelskarren zwischen Spielern.

@@ -297,7 +297,8 @@ export class Sim {
       befehl: null, folge: [],           // Warteschlange weiterer Befehle
       zielId: 0, angriffRest: 0, ladung: 0, ladungArt: null, sammelRest: 0,
       quelleI: -1, abgabeId: 0, bauId: 0, bekehrRest: 0, ruheRest: 0,
-      steckRest: 0, warteRest: 0, bauVersuche: 0, tot: false, neu: true
+      steckRest: 0, warteRest: 0, bauVersuche: 0, abgabeVersuche: 0, letzteArbeit: null,
+      tot: false, neu: true
     };
     this.einheiten.push(e);
     this.nachId.set(e.id, e);
@@ -337,6 +338,36 @@ export class Sim {
       }
     }
     if (frei < 3) return false;
+
+    /* Und kein Bau darf ein bestehendes Gebaeude einmauern. Wer seine
+       Muehle mit Aeckern umstellt, kann dort nichts mehr abliefern —
+       die Traeger laufen dann bis zum Ende der Partie im Kreis. */
+    const nachbarn = new Set();
+    for (let y = ky - 1; y <= ky + g; y++) {
+      for (let x = kx - 1; x <= kx + g; x++) {
+        if (!drin(k, x, y)) continue;
+        const id = this.belegt[y * k.breite + x];
+        if (id) nachbarn.add(id);
+      }
+    }
+    for (const id of nachbarn) {
+      const nb = this.nachId.get(id);
+      if (!nb || nb.tot) continue;
+      let luft = 0;
+      for (let y = nb.ky - 1; y <= nb.ky + nb.groesse; y++) {
+        for (let x = nb.kx - 1; x <= nb.kx + nb.groesse; x++) {
+          if (x > nb.kx - 1 && x < nb.kx + nb.groesse && y > nb.ky - 1 && y < nb.ky + nb.groesse) continue;
+          if (!drin(k, x, y)) continue;
+          if (x >= kx && x < kx + g && y >= ky && y < ky + g) continue;   // der geplante Bau
+          const j = y * k.breite + x;
+          if (this.belegt[j]) continue;
+          if (k.boden[j] === BODEN.wasser || k.boden[j] === BODEN.fels) continue;
+          if (k.vorkommen[j] === 1 || k.vorkommen[j] === 5 || k.vorkommen[j] === 6) continue;
+          luft++;
+        }
+      }
+      if (luft < 2) return false;
+    }
 
     /* Flaches Gelaende verlangt: kein Bau ueber Hangkanten. */
     const h0 = k.hoehen[ky * k.breite + kx];
@@ -768,6 +799,23 @@ export class Sim {
   /* ═══════════════ Befehl auf eine Einheit setzen ═══════════════ */
 
   befehlSetzen(e, b) {
+    /* Wechselt ein Traeger die Rohstoffart, liefert er erst ab, was er
+       schon geschultert hat. Ohne das faellt bei jedem Umschichten eine
+       ganze Ladung in den Dreck — bei einer KI, die staendig
+       umverteilt, ist das die halbe Wirtschaft. */
+    if (b && (b.art === 'sammeln' || b.art === 'ackern') && e.ladung > 0 && e.ladungArt) {
+      const neuerRohstoff = this.rohstoffVonBefehl(b);
+      if (neuerRohstoff && neuerRohstoff !== e.ladungArt) {
+        const w = this.werte(e.spieler, e.typ);
+        const abgabe = this.naechsteAbgabe(e, e.ladungArt);
+        if (abgabe) {
+          e.befehl = b;
+          e.pfad = null; e.pfadI = 0; e.zielId = 0; e.quelleI = -1; e.bauId = 0;
+          this.zurAbgabe(e, w);
+          return;
+        }
+      }
+    }
     e.befehl = b;
     e.zielId = 0; e.quelleI = -1; e.bauId = 0; e.pfad = null; e.pfadI = 0;
     e.bekehrRest = 0; e.steckRest = 0;
@@ -786,12 +834,14 @@ export class Sim {
       case 'sammeln':
         e.quelleI = this.kachelIdx(b.kx, b.ky);
         e.zustand = ZUSTAND.sammeln;
+        e.letzteArbeit = b;
         this.zurQuelle(e, b.kx, b.ky);
         break;
       case 'ackern': {
         const g = this.nachId.get(b.ziel);
         if (!g || g.tot) { this.befehlSetzen(e, null); return; }
         e.zielId = g.id; e.zustand = ZUSTAND.sammeln;
+        e.letzteArbeit = b;
         this.zumGebaeude(e, g);
         break;
       }
@@ -811,6 +861,38 @@ export class Sim {
         break;
       }
     }
+  }
+
+  /** Naechsten Befehl aus der Warteschlange holen. */
+  /** Welchen Rohstoff bringt dieser Sammelbefehl ein? */
+  rohstoffVonBefehl(b) {
+    if (b.art === 'ackern') return 'nahrung';
+    if (b.art !== 'sammeln') return null;
+    if (!drin(this.karte, b.kx, b.ky)) return null;
+    const v = this.karte.vorkommen[this.kachelIdx(b.kx, b.ky)];
+    if (!v) return null;
+    return VORKOMMEN[VORKOMMEN_LISTE[v - 1]].rohstoff;
+  }
+
+  /**
+   * Nach getaner Bauarbeit zurueck an die alte Quelle. Im Vorbild
+   * bleiben die Leute stehen und man sammelt sie mit der Punkt-Taste
+   * wieder ein; das hier ist die freundlichere Fassung — wer vorher
+   * Holz gefaellt hat, faellt danach weiter Holz.
+   */
+  nachDemBau(e) {
+    if (e.folge.length) return this.befehlFertig(e);
+    const arbeit = e.letzteArbeit;
+    if (arbeit) {
+      if (arbeit.art === 'sammeln' && drin(this.karte, arbeit.kx, arbeit.ky)) {
+        const i = this.kachelIdx(arbeit.kx, arbeit.ky);
+        if (this.karte.vorkommen[i] && this.karte.menge[i] > 0) return this.befehlSetzen(e, arbeit);
+      } else if (arbeit.art === 'ackern') {
+        const f = this.nachId.get(arbeit.ziel);
+        if (f && !f.tot && f.vorrat > 0) return this.befehlSetzen(e, arbeit);
+      }
+    }
+    this.befehlFertig(e);
   }
 
   /** Naechsten Befehl aus der Warteschlange holen. */
@@ -1168,7 +1250,13 @@ export class Sim {
     if (e.zielId) {
       const farm = this.nachId.get(e.zielId);
       if (!farm || farm.tot) { this.quelleErsetzen(e, w, 'nahrung'); return; }
-      if (!farm.fertig) { if (this.bewegen(e, w)) e.zielX = e.x; return; }
+      if (!farm.fertig) {
+        /* Vor einer Baustelle wartet niemand — er greift zu. Danach
+           erntet er denselben Acker. */
+        e.folge.unshift({ art: 'ackern', ziel: farm.id });
+        this.befehlSetzen(e, { art: 'bauen', ziel: farm.id });
+        return;
+      }
       if (!this.amGebaeude(e, farm)) {
         if (this.bewegen(e, w) || ++e.warteRest > 120) { e.warteRest = 0; this.zumGebaeude(e, farm); }
         return;
@@ -1239,8 +1327,8 @@ export class Sim {
     if (e.ladung >= grenze) this.zurAbgabe(e, w);
   }
 
-  zurAbgabe(e, w) {
-    const ziel = this.naechsteAbgabe(e, e.ladungArt);
+  zurAbgabe(e, w, ausser) {
+    const ziel = this.naechsteAbgabe(e, e.ladungArt, ausser);
     if (!ziel) { e.zustand = ZUSTAND.sammeln; return; }   // nirgends abzugeben: weitersammeln
     e.abgabeId = ziel.id;
     e.zustand = ZUSTAND.zurueck;
@@ -1252,10 +1340,16 @@ export class Sim {
     const ziel = this.nachId.get(e.abgabeId);
     if (!ziel || ziel.tot || !ziel.fertig) { this.zurAbgabe(e, w); return; }
     if (!this.amGebaeude(e, ziel)) {
-      if (this.bewegen(e, w) || ++e.warteRest > 120) { e.warteRest = 0; this.zumGebaeude(e, ziel); }
+      if (this.bewegen(e, w) || ++e.warteRest > 120) {
+        e.warteRest = 0;
+        /* Beim zweiten vergeblichen Anlauf ist das Lager offenbar
+           verbaut — dann eben ein anderes. */
+        if (++e.abgabeVersuche > 2) { e.abgabeVersuche = 0; this.zurAbgabe(e, w, ziel.id); return; }
+        this.zumGebaeude(e, ziel);
+      }
       return;
     }
-    e.warteRest = 0;
+    e.warteRest = 0; e.abgabeVersuche = 0;
     const p = this.spieler[e.spieler];
     p.rohstoffe[e.ladungArt] += e.ladung;
     p.statistik.gesammelt[e.ladungArt] += e.ladung;
@@ -1270,7 +1364,7 @@ export class Sim {
   }
 
   /** Naechstes Gebaeude, das diesen Rohstoff annimmt. */
-  naechsteAbgabe(e, rohstoff) {
+  naechsteAbgabe(e, rohstoff, ausser) {
     /* Achtung: Abstaende stehen im Quadrat und in Fixpunkt — schon
        40 Kacheln ergeben 1,6 Milliarden. Deshalb Infinity als
        Startwert und nirgends 1<<30. */
@@ -1279,6 +1373,7 @@ export class Sim {
       if (b.tot || !b.fertig || b.spieler !== e.spieler) continue;
       const def = GEBAEUDE[b.typ];
       if (!def.abgabe || def.abgabe.indexOf(rohstoff) < 0) continue;
+      if (ausser && b.id === ausser) continue;
       const d = abstand2(e.x, e.y, b.x, b.y);
       if (d < bestD) { bestD = d; bestes = b; }
     }
@@ -1308,13 +1403,18 @@ export class Sim {
       this.befehlSetzen(e, { art: 'sammeln', kx: bx, ky: by });
       return;
     }
-    /* Nichts mehr da: Farm suchen, sonst stehen bleiben. */
+    /* Nichts mehr da: den naechsten Acker nehmen, der auch etwas
+       hergibt. Die erstbeste Farm zu waehlen ist ein Fehler — sie kann
+       noch im Bau oder schon abgeerntet sein. */
     if (rohstoff === 'nahrung') {
+      let beste = null, bestD = Infinity;
       for (const b of this.gebaeude) {
         if (b.tot || b.spieler !== e.spieler || !GEBAEUDE[b.typ].acker) continue;
-        this.befehlSetzen(e, { art: 'ackern', ziel: b.id });
-        return;
+        if (!b.fertig || b.vorrat <= 0) continue;
+        const d = abstand2(e.x, e.y, b.x, b.y);
+        if (d < bestD) { bestD = d; beste = b; }
       }
+      if (beste) { this.befehlSetzen(e, { art: 'ackern', ziel: beste.id }); return; }
     }
     this.befehlFertig(e);
   }
@@ -1582,7 +1682,7 @@ export class Sim {
           this.gebaeudeFertig(b);
           /* Die Bauleute machen weiter: das naechste Bauwerk oder Arbeit. */
           for (const e of this.einheiten) {
-            if (!e.tot && e.bauId === b.id && e.zustand === ZUSTAND.bauen) this.befehlFertig(e);
+            if (!e.tot && e.bauId === b.id && e.zustand === ZUSTAND.bauen) this.nachDemBau(e);
           }
         }
       }
