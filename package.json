@@ -1,0 +1,13 @@
+{
+  "name": "age-of-generation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Age of Generation — Echtzeit-Strategie im Stil von Age of Empires II: 3D im Browser, Zufallskarten, Mehrspieler mit Zuschauern und Aufzeichnungen. Ohne Abhaengigkeiten.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=18" }
+}
