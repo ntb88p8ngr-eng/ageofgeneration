@@ -142,13 +142,49 @@ export class Welt {
     this.szene.add(this.gelaende);
   }
 
+  /* Wasser wird kachelweise gezeichnet und nicht als eine grosse
+     Platte. Nur so laesst es sich vom Nebel des Krieges verdecken —
+     sonst laege die Seenlandschaft der ganzen Karte offen, bevor ein
+     Spaeher sie je gesehen hat. */
   wasserBauen() {
     const k = this.sim.karte;
-    const geo = new THREE.PlaneGeometry(k.breite, k.hoehe, 1, 1);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(k.breite / 2, WASSER_Y, k.hoehe / 2);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x2f6d8c, transparent: true, opacity: 0.82 });
-    this.wasser = new THREE.Mesh(geo, mat);
+    const kacheln = [];
+    for (let y = 0; y < k.hoehe; y++) {
+      for (let x = 0; x < k.breite; x++) {
+        if (k.boden[y * k.breite + x] === BODEN.wasser) kacheln.push(y * k.breite + x);
+      }
+    }
+    this.wasserKacheln = kacheln;
+    if (!kacheln.length) { this.wasser = null; return; }
+
+    const pos = new Float32Array(kacheln.length * 18);
+    const far = new Float32Array(kacheln.length * 18);
+    const nor = new Float32Array(kacheln.length * 18);
+    this.wasserBasis = new Float32Array(kacheln.length * 18);
+    const c = new THREE.Color(0x2f6d8c);
+    for (let n = 0; n < kacheln.length; n++) {
+      const i = kacheln[n];
+      const x = i % k.breite, y = (i / k.breite) | 0;
+      const o = n * 18;
+      pos.set([
+        x, WASSER_Y, y, x, WASSER_Y, y + 1, x + 1, WASSER_Y, y,
+        x + 1, WASSER_Y, y, x, WASSER_Y, y + 1, x + 1, WASSER_Y, y + 1
+      ], o);
+      for (let v = 0; v < 6; v++) {
+        far[o + v * 3] = c.r; far[o + v * 3 + 1] = c.g; far[o + v * 3 + 2] = c.b;
+        nor[o + v * 3] = 0; nor[o + v * 3 + 1] = 1; nor[o + v * 3 + 2] = 0;
+      }
+    }
+    this.wasserBasis.set(far);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(far, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    this.wasserGeo = geo;
+    this.wasser = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      vertexColors: true, transparent: true, opacity: 0.85
+    }));
+    this.wasser.frustumCulled = false;
     this.wasser.renderOrder = 1;
     this.szene.add(this.wasser);
   }
@@ -463,6 +499,20 @@ export class Welt {
       }
     }
     farben.needsUpdate = true;
+
+    /* Dasselbe fuer die Wasserkacheln. */
+    if (this.wasser && this.wasserKacheln) {
+      const wf = this.wasserGeo.attributes.color;
+      const wa = wf.array;
+      for (let n = 0; n < this.wasserKacheln.length; n++) {
+        const i = this.wasserKacheln[n];
+        const s = this.sichtbarFuer(this.spielerId, i % k.breite, (i / k.breite) | 0);
+        const f = s === 2 ? 1 : (s === 1 ? 0.5 : 0.06);
+        const o = n * 18;
+        for (let v = 0; v < 18; v++) wa[o + v] = this.wasserBasis[o + v] * f;
+      }
+      wf.needsUpdate = true;
+    }
   }
 
   /* ─────────────── Auswahl und Balken ─────────────── */

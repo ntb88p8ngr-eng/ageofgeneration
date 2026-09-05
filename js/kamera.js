@@ -22,7 +22,11 @@ export class Kamera {
     this.schub = new THREE.Vector2();
     this.tasten = new Set();
     this.randScrollen = true;
-    this.maus = { x: 0, y: 0, drin: false };
+    /* Vor der ersten Mausbewegung darf der Bildschirmrand nicht
+       schieben: sonst stuende der Zeiger rechnerisch bei (0,0) — also
+       in der linken oberen Ecke — und die Kamera wanderte beim Start
+       von selbst aus dem Dorf heraus. */
+    this.maus = { x: 0, y: 0, drin: false, gesehen: false };
     this.aktualisiere(0);
   }
 
@@ -36,7 +40,7 @@ export class Kamera {
     if (this.tasten.has('d') || this.tasten.has('arrowright')) vx += 1;
 
     /* Bildschirmrand schiebt mit — wie im Vorbild. */
-    if (this.randScrollen && this.maus.drin) {
+    if (this.randScrollen && this.maus.drin && this.maus.gesehen) {
       const b = this.welt.leinwand.clientWidth, h = this.welt.leinwand.clientHeight;
       const rand = 12;
       if (this.maus.x < rand) vx -= 1;

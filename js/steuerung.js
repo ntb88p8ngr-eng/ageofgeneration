@@ -105,6 +105,7 @@ export class Steuerung {
   mausBewegt(e) {
     const p = this.ort(e);
     this.kamera.maus.x = p.x; this.kamera.maus.y = p.y;
+    this.kamera.maus.gesehen = true;
 
     if (this.dreht && this.letzteMaus) {
       this.kamera.drehen((p.x - this.letzteMaus.x) * 0.006, (p.y - this.letzteMaus.y) * 0.004);
