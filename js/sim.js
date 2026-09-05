@@ -1008,9 +1008,17 @@ export class Sim {
 
   /* ═══════════════ Ein Simulationsschritt ═══════════════ */
 
-  /** Fuehrt eine Netzwerkrunde aus: erst die Befehle, dann die Takte. */
+  /** Befehle einer Runde einspielen (ohne zu rechnen). */
+  befehleAnwenden(befehle) {
+    if (!befehle) return;
+    for (const c of befehle) this.befehlAusfuehren(c);
+  }
+
+  /** Fuehrt eine Netzwerkrunde vollstaendig aus — fuer Tests und
+      Aufzeichnungen. Die Darstellung ruft stattdessen befehleAnwenden()
+      und takten() einzeln auf, damit jede Bewegung weich bleibt. */
   rundeAusfuehren(befehle) {
-    if (befehle) for (const c of befehle) this.befehlAusfuehren(c);
+    this.befehleAnwenden(befehle);
     for (let i = 0; i < RUNDE_TAKTE; i++) this.takten();
     this.runde++;
   }

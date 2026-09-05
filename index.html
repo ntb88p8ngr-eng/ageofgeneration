@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Age of Generation — Reich der Zeitalter</title>
+<meta name="description" content="Echtzeit-Strategie im Browser: Zufallskarten, vier Voelker, vier Zeitalter, Mehrspieler mit Zuschauern und Aufzeichnungen.">
+<link rel="stylesheet" href="css/spiel.css">
+</head>
+<body>
+
+<!-- ═══════════ Startbildschirm ═══════════ -->
+<div id="menue" class="schirm">
+  <div class="menue-innen">
+    <h1>Age of Generation</h1>
+    <p class="unterzeile">Reich der Zeitalter — vom Dorf zur Weltmacht</p>
+
+    <nav class="reiter">
+      <button class="reiter-knopf an" data-reiter="einzel">Einzelspiel</button>
+      <button class="reiter-knopf" data-reiter="mehr">Mehrspieler</button>
+      <button class="reiter-knopf" data-reiter="replay">Aufzeichnungen</button>
+      <button class="reiter-knopf" data-reiter="hilfe">Steuerung</button>
+    </nav>
+
+    <!-- Einzelspiel -->
+    <section id="tab-einzel" class="tafel">
+      <div class="feldreihe">
+        <label>Volk
+          <select id="e-volk"></select>
+        </label>
+        <label>Gegner
+          <select id="e-gegner">
+            <option value="1">1 Gegner</option>
+            <option value="2">2 Gegner</option>
+            <option value="3" selected>3 Gegner</option>
+            <option value="5">5 Gegner</option>
+            <option value="7">7 Gegner</option>
+          </select>
+        </label>
+        <label>Schwierigkeit
+          <select id="e-stufe">
+            <option value="leicht">Leicht</option>
+            <option value="normal" selected>Normal</option>
+            <option value="schwer">Schwer</option>
+          </select>
+        </label>
+      </div>
+      <div class="feldreihe">
+        <label>Karte
+          <select id="e-karte"></select>
+        </label>
+        <label>Groesse
+          <select id="e-groesse"></select>
+        </label>
+        <label>Teams
+          <select id="e-teams">
+            <option value="frei" selected>Jeder gegen jeden</option>
+            <option value="zwei">Zwei Lager</option>
+          </select>
+        </label>
+      </div>
+      <div class="feldreihe">
+        <label>Bevoelkerung
+          <select id="e-bev">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <label>Startgut
+          <select id="e-start">
+            <option value="normal" selected>Normal</option>
+            <option value="reich">Reich</option>
+          </select>
+        </label>
+        <label>Saat
+          <input id="e-saat" type="text" placeholder="zufaellig" size="8">
+        </label>
+      </div>
+      <p id="e-volkstext" class="hinweistext"></p>
+      <button id="e-start-knopf" class="grossknopf">Partie beginnen</button>
+    </section>
+
+    <!-- Mehrspieler -->
+    <section id="tab-mehr" class="tafel versteckt">
+      <div class="feldreihe">
+        <label>Name
+          <input id="m-name" type="text" maxlength="16" placeholder="Dein Name">
+        </label>
+        <button id="m-neu" class="knopf">Partie eroeffnen</button>
+        <button id="m-auffrischen" class="knopf">Liste auffrischen</button>
+      </div>
+      <div id="m-liste" class="liste"></div>
+      <div id="m-raum" class="versteckt">
+        <h3 id="m-raum-titel">Warteraum</h3>
+        <div id="m-plaetze" class="plaetze"></div>
+        <div class="feldreihe" id="m-einstellungen"></div>
+        <div class="feldreihe">
+          <button id="m-bereit" class="knopf">Bereit</button>
+          <button id="m-starten" class="grossknopf">Partie starten</button>
+          <button id="m-verlassen" class="knopf">Verlassen</button>
+        </div>
+        <div id="m-chat" class="chatfeld"></div>
+        <input id="m-chat-eingabe" type="text" placeholder="Nachricht an alle ..." maxlength="200">
+      </div>
+      <p id="m-status" class="hinweistext"></p>
+    </section>
+
+    <!-- Aufzeichnungen -->
+    <section id="tab-replay" class="tafel versteckt">
+      <p class="hinweistext">Jede beendete Partie wird als Befehlsliste aufgezeichnet und laesst sich hier
+        noch einmal ansehen — mit allem, was jeder Spieler gesehen hat.</p>
+      <div class="feldreihe">
+        <button id="r-auffrischen" class="knopf">Liste auffrischen</button>
+        <label class="dateiknopf">Datei oeffnen<input id="r-datei" type="file" accept=".json"></label>
+      </div>
+      <div id="r-liste" class="liste"></div>
+    </section>
+
+    <!-- Hilfe -->
+    <section id="tab-hilfe" class="tafel versteckt">
+      <div class="hilfe-spalten">
+        <div>
+          <h3>Kamera</h3>
+          <ul>
+            <li><b>W A S D</b> / Pfeiltasten / Bildschirmrand — schieben</li>
+            <li><b>Mausrad</b> — zoomen</li>
+            <li><b>Q</b> / <b>E</b> oder <b>Alt+Ziehen</b> — drehen</li>
+            <li><b>R</b> / <b>F</b> — kippen</li>
+            <li><b>Mittlere Taste</b> — Karte ziehen</li>
+            <li><b>Klick auf die Minikarte</b> — hinspringen</li>
+          </ul>
+          <h3>Auswahl</h3>
+          <ul>
+            <li><b>Links</b> — auswaehlen, Ziehen = Rechteck</li>
+            <li><b>Doppelklick</b> — alle sichtbaren gleicher Art</li>
+            <li><b>Umschalt+Klick</b> — zur Auswahl hinzu</li>
+            <li><b>Strg+Zahl</b> — Gruppe merken, <b>Zahl</b> — abrufen</li>
+            <li><b>H</b> — Dorfzentrum, <b>.</b> — untaetiger Dorfbewohner</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Befehle</h3>
+          <ul>
+            <li><b>Rechts</b> auf Boden — hingehen</li>
+            <li><b>Rechts</b> auf Feind — angreifen</li>
+            <li><b>Rechts</b> auf Wald, Erz, Wild — sammeln</li>
+            <li><b>Rechts</b> auf eigene Baustelle — mitbauen</li>
+            <li><b>Rechts</b> mit gewaehltem Gebaeude — Sammelpunkt</li>
+            <li><b>Umschalt</b> — Befehl anhaengen</li>
+            <li><b>S</b> — anhalten, <b>Entf</b> — abreissen</li>
+          </ul>
+          <h3>Bauen und Ausbilden</h3>
+          <ul>
+            <li>Dorfbewohner gewaehlt: <b>Q</b> Haus, <b>W</b> Muehle, <b>F</b> Farm,
+              <b>R</b> Lager, <b>A</b> Kaserne, <b>S</b> Schuetzenstand, <b>D</b> Stall,
+              <b>T</b> Turm, <b>Z</b> Mauer, <b>C</b> Burg …</li>
+            <li>Mauern lassen sich mit gedrueckter Taste in einer Reihe ziehen</li>
+            <li>Gebaeude gewaehlt: Anfangstaste der Einheit, <b>Umschalt</b> = fuenf auf einmal</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ═══════════ Spiel ═══════════ -->
+<div id="spiel" class="versteckt">
+  <canvas id="leinwand"></canvas>
+  <div id="rahmen"></div>
+
+  <!-- Kopfleiste -->
+  <div id="kopf">
+    <div class="rohstoffe">
+      <span class="rohstoff" title="Nahrung"><i class="sym sym-nahrung"></i><b id="r-nahrung">0</b></span>
+      <span class="rohstoff" title="Holz"><i class="sym sym-holz"></i><b id="r-holz">0</b></span>
+      <span class="rohstoff" title="Gold"><i class="sym sym-gold"></i><b id="r-gold">0</b></span>
+      <span class="rohstoff" title="Stein"><i class="sym sym-stein"></i><b id="r-stein">0</b></span>
+      <span class="rohstoff" title="Bevoelkerung"><i class="sym sym-bev"></i><b id="r-bev">0/0</b></span>
+    </div>
+    <div class="kopf-rechts">
+      <span id="k-zeitalter" class="zeitalter">Dunkle Zeit</span>
+      <span id="k-uhr" class="uhr">0:00</span>
+      <button id="k-menue" class="knopf klein">Menue</button>
+    </div>
+  </div>
+
+  <div id="meldungen"></div>
+  <div id="hinweis"></div>
+
+  <!-- Fussleiste -->
+  <div id="fuss">
+    <div id="minikarte-halter">
+      <canvas id="minikarte" width="220" height="220"></canvas>
+    </div>
+    <div id="auswahl">
+      <div id="auswahl-kopf"></div>
+      <div id="auswahl-liste"></div>
+    </div>
+    <div id="knoepfe"></div>
+  </div>
+
+  <div id="chatzeile" class="versteckt"><input id="chat-eingabe" type="text" maxlength="200" placeholder="Nachricht ..."></div>
+
+  <!-- Ergebnis -->
+  <div id="ende" class="schirm versteckt">
+    <div class="menue-innen schmal">
+      <h1 id="ende-titel">Partie beendet</h1>
+      <div id="ende-tafel"></div>
+      <button id="ende-zurueck" class="grossknopf">Zurueck zum Menue</button>
+    </div>
+  </div>
+
+  <!-- Pausen- und Spielmenue -->
+  <div id="spielmenue" class="schirm versteckt">
+    <div class="menue-innen schmal">
+      <h2>Pause</h2>
+      <button id="sm-weiter" class="grossknopf">Weiterspielen</button>
+      <button id="sm-aufgeben" class="knopf">Aufgeben</button>
+      <button id="sm-replay" class="knopf">Aufzeichnung sichern</button>
+      <button id="sm-verlassen" class="knopf">Partie verlassen</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/spiel.js"></script>
+</body>
+</html>

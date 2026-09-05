@@ -1,0 +1,242 @@
+/* ═══════════════════════════════════════════════════════════
+   AGE OF GENERATION — Gestaltung
+   Pergament und Tinte fuer die Menues, moeglichst wenig
+   Oberflaeche im Spiel selbst: das Bild soll die Karte sein.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  --tinte: #2a2118;
+  --pergament: #e8dcc0;
+  --pergament-dunkel: #d3c29c;
+  --rahmen: #6b5433;
+  --gold: #c9a227;
+  --rot: #8c2f22;
+  --gruen: #4a7a34;
+  --leiste: rgba(30, 24, 16, 0.88);
+  --leiste-rand: #7a6440;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%; overflow: hidden;
+  background: #14100c;
+  color: var(--pergament);
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select { font-family: inherit; font-size: 14px; }
+
+.versteckt { display: none !important; }
+
+/* ─────────────── Menue ─────────────── */
+
+.schirm {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(200,170,110,.18), transparent 60%),
+    linear-gradient(160deg, #241c12 0%, #14100c 60%, #0d0a07 100%);
+  overflow: auto;
+}
+
+.menue-innen {
+  width: min(940px, 94vw);
+  margin: 24px auto;
+  padding: 26px 30px 30px;
+  background: linear-gradient(180deg, #efe4ca, #ddd0b0);
+  color: var(--tinte);
+  border: 3px solid var(--rahmen);
+  border-radius: 6px;
+  box-shadow: 0 22px 60px rgba(0,0,0,.6), inset 0 0 60px rgba(160,130,80,.25);
+}
+.menue-innen.schmal { width: min(520px, 92vw); text-align: center; }
+
+.menue-innen h1 {
+  margin: 0 0 2px; font-size: 34px; letter-spacing: .5px;
+  color: #4a3418; text-shadow: 0 1px 0 rgba(255,255,255,.4);
+}
+.unterzeile { margin: 0 0 18px; color: #6b5433; font-style: italic; }
+
+.reiter { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.reiter-knopf {
+  padding: 8px 16px; border: 2px solid var(--rahmen); border-bottom: none;
+  background: #cbbb96; color: #3a2c17; cursor: pointer; border-radius: 5px 5px 0 0;
+}
+.reiter-knopf.an { background: #f3e9d2; font-weight: bold; }
+.reiter-knopf:hover { background: #e6d9ba; }
+
+.tafel {
+  border: 2px solid var(--rahmen); border-radius: 0 6px 6px 6px;
+  padding: 16px; background: rgba(255,252,240,.55);
+}
+
+.feldreihe { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+.feldreihe label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #5a4526; }
+.feldreihe select, .feldreihe input {
+  padding: 6px 8px; border: 1px solid #9d8a63; border-radius: 4px;
+  background: #fbf6e8; color: var(--tinte); min-width: 150px;
+}
+
+.knopf {
+  padding: 8px 14px; border: 2px solid var(--rahmen); border-radius: 4px;
+  background: linear-gradient(180deg, #e3d5b2, #cbb98e); color: #3a2c17;
+  cursor: pointer;
+}
+.knopf:hover { background: linear-gradient(180deg, #f0e4c6, #d8c69c); }
+.knopf.klein { padding: 4px 10px; font-size: 12px; }
+.knopf:disabled { opacity: .5; cursor: default; }
+
+.grossknopf {
+  padding: 12px 26px; margin-top: 6px; font-size: 17px; font-weight: bold;
+  border: 2px solid #6b4a1f; border-radius: 5px; cursor: pointer;
+  background: linear-gradient(180deg, #d8b657, #b8912f); color: #2a1e08;
+  box-shadow: 0 2px 0 #7a5e1c;
+}
+.grossknopf:hover { background: linear-gradient(180deg, #e7c86b, #c79f36); }
+
+.hinweistext { color: #6b5433; font-size: 13px; line-height: 1.5; }
+
+.liste { max-height: 260px; overflow: auto; border: 1px solid #a08c63; border-radius: 4px; background: #fbf6e8; }
+.listenzeile {
+  display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+  border-bottom: 1px solid #e0d3b2; color: #3a2c17;
+}
+.listenzeile:last-child { border-bottom: none; }
+.listenzeile b { min-width: 160px; }
+.listenzeile .rest { flex: 1; font-size: 13px; color: #6b5433; }
+
+.plaetze { display: grid; gap: 6px; margin-bottom: 12px; }
+.platz {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: #fbf6e8; border: 1px solid #b9a678; border-radius: 4px; color: #3a2c17;
+}
+.platz .farbfleck { width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(0,0,0,.4); }
+.platz select { min-width: 120px; }
+.platz .name { flex: 1; font-weight: bold; }
+.platz .bereit { color: var(--gruen); font-weight: bold; }
+
+.chatfeld {
+  height: 110px; overflow: auto; background: #fbf6e8; border: 1px solid #a08c63;
+  border-radius: 4px; padding: 6px 8px; color: #3a2c17; font-size: 13px; margin-bottom: 6px;
+}
+#m-chat-eingabe { width: 100%; padding: 6px 8px; border: 1px solid #9d8a63; border-radius: 4px; background: #fbf6e8; }
+
+.dateiknopf {
+  padding: 8px 14px; border: 2px solid var(--rahmen); border-radius: 4px;
+  background: linear-gradient(180deg, #e3d5b2, #cbb98e); color: #3a2c17; cursor: pointer;
+}
+.dateiknopf input { display: none; }
+
+.hilfe-spalten { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; color: #3a2c17; }
+.hilfe-spalten h3 { margin: 12px 0 6px; color: #5a3f18; }
+.hilfe-spalten ul { margin: 0; padding-left: 18px; line-height: 1.7; font-size: 14px; }
+@media (max-width: 720px) { .hilfe-spalten { grid-template-columns: 1fr; } }
+
+/* ─────────────── Spielfeld ─────────────── */
+
+#spiel { position: fixed; inset: 0; }
+#leinwand { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+
+#rahmen {
+  position: absolute; border: 1px solid #f0e2b8; background: rgba(240,226,184,.14);
+  pointer-events: none; display: none;
+}
+
+#kopf {
+  position: absolute; top: 0; left: 0; right: 0; height: 40px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; background: var(--leiste); border-bottom: 2px solid var(--leiste-rand);
+  font-size: 15px; user-select: none;
+}
+.rohstoffe { display: flex; gap: 18px; }
+.rohstoff { display: flex; align-items: center; gap: 6px; }
+.rohstoff b { font-variant-numeric: tabular-nums; min-width: 42px; }
+.sym { width: 15px; height: 15px; border-radius: 3px; display: inline-block; }
+.sym-nahrung { background: #d05a3a; }
+.sym-holz { background: #8a5a33; }
+.sym-gold { background: #e0b93a; }
+.sym-stein { background: #a8a8a2; }
+.sym-bev { background: #6fa8dc; border-radius: 50%; }
+
+.kopf-rechts { display: flex; align-items: center; gap: 14px; }
+.zeitalter { color: var(--gold); font-weight: bold; }
+.uhr { font-variant-numeric: tabular-nums; opacity: .85; }
+
+#meldungen {
+  position: absolute; top: 48px; left: 12px; width: 300px;
+  display: flex; flex-direction: column; gap: 4px; pointer-events: none;
+}
+.meldung {
+  background: rgba(30,24,16,.82); border-left: 3px solid var(--gold);
+  padding: 5px 9px; font-size: 13px; border-radius: 0 3px 3px 0;
+  animation: einblenden .25s ease-out;
+}
+.meldung.warnung { border-left-color: #d05a3a; }
+.meldung.gut { border-left-color: #6fbd4a; }
+@keyframes einblenden { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; } }
+
+#hinweis {
+  position: absolute; top: 50px; left: 50%; transform: translateX(-50%);
+  background: rgba(30,24,16,.9); padding: 6px 14px; border-radius: 4px;
+  border: 1px solid var(--leiste-rand); font-size: 14px; opacity: 0;
+  transition: opacity .2s; pointer-events: none;
+}
+#hinweis.an { opacity: 1; }
+
+#fuss {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 190px;
+  display: flex; gap: 8px; padding: 8px;
+  background: var(--leiste); border-top: 2px solid var(--leiste-rand);
+}
+#minikarte-halter { flex: 0 0 auto; border: 2px solid var(--leiste-rand); border-radius: 4px; overflow: hidden; }
+#minikarte { display: block; width: 172px; height: 172px; cursor: pointer; }
+
+#auswahl { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
+#auswahl-kopf { font-size: 15px; font-weight: bold; color: var(--gold); }
+#auswahl-kopf .werte { display: block; font-size: 12px; font-weight: normal; color: #d9cba8; margin-top: 2px; }
+#auswahl-liste { display: flex; flex-wrap: wrap; gap: 4px; overflow: auto; }
+.einheitknopf {
+  width: 46px; height: 46px; border: 1px solid var(--leiste-rand); border-radius: 3px;
+  background: rgba(70,56,36,.7); color: #efe4ca; font-size: 10px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 2px; line-height: 1.1; text-align: center;
+}
+.einheitknopf .lebensbalken { width: 90%; height: 3px; background: #402f1c; }
+.einheitknopf .lebensbalken i { display: block; height: 100%; background: #6fbd4a; }
+
+#knoepfe { flex: 0 0 340px; display: grid; grid-template-columns: repeat(5, 62px); grid-auto-rows: 62px; gap: 5px; align-content: start; overflow: auto; }
+.aktion {
+  border: 1px solid var(--leiste-rand); border-radius: 4px; cursor: pointer;
+  background: linear-gradient(180deg, rgba(90,72,46,.85), rgba(56,44,28,.9));
+  color: #f0e6cc; font-size: 10px; padding: 3px; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  line-height: 1.15; text-align: center;
+}
+.aktion:hover { background: linear-gradient(180deg, rgba(120,96,60,.9), rgba(76,60,38,.95)); }
+.aktion:disabled { opacity: .42; cursor: default; }
+.aktion .taste {
+  position: absolute; top: 2px; left: 3px; font-size: 9px; color: var(--gold); font-weight: bold;
+}
+.aktion .form { width: 22px; height: 20px; background: #cbb98e; }
+.aktion .form.haus { clip-path: polygon(50% 0, 100% 42%, 100% 100%, 0 100%, 0 42%); }
+.aktion .form.turm { clip-path: polygon(20% 100%, 20% 25%, 50% 0, 80% 25%, 80% 100%); }
+.aktion .form.mauer { clip-path: polygon(0 40%, 15% 40%, 15% 25%, 35% 25%, 35% 40%, 65% 40%, 65% 25%, 85% 25%, 85% 40%, 100% 40%, 100% 100%, 0 100%); }
+.aktion .form.acker { clip-path: polygon(10% 20%, 90% 20%, 100% 100%, 0 100%); background: #8fae4c; }
+.aktion .form.einheit { clip-path: polygon(38% 0, 62% 0, 62% 28%, 80% 100%, 20% 100%, 38% 28%); }
+.aktion .form.forschung { border-radius: 50%; background: #d8b657; }
+.aktion .form.zeitalter { clip-path: polygon(50% 0, 100% 100%, 0 100%); background: #d8b657; }
+.aktion .kosten { font-size: 9px; color: #d9cba8; }
+.aktion.warteschlange { background: rgba(40,32,20,.9); }
+.aktion .fortschritt { position: absolute; bottom: 0; left: 0; height: 3px; background: var(--gold); }
+
+#chatzeile { position: absolute; left: 12px; bottom: 200px; }
+#chatzeile input {
+  width: 380px; padding: 6px 10px; border: 1px solid var(--leiste-rand);
+  background: rgba(20,16,10,.9); color: var(--pergament); border-radius: 3px;
+}
+
+#ende-tafel { margin: 14px 0; }
+.ende-zeile { display: flex; justify-content: space-between; gap: 10px; padding: 5px 8px; border-bottom: 1px solid #cbbb96; color: #3a2c17; font-size: 14px; }
+.ende-zeile.sieger { background: rgba(216,182,87,.35); font-weight: bold; }
