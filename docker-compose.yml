@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════════════════════
+#  AGE OF GENERATION hinter Traefik
+#
+#      docker compose up -d --build
+#
+#  Erreichbar unter  https://6idioten.ddns.net/aog/
+#
+#  Traefik nimmt den Pfad /aog entgegen, schneidet ihn ab und
+#  reicht die Anfrage als / an das Spiel weiter (StripPrefix).
+#  Das geht auf, weil im HTML ausschliesslich relative Pfade
+#  stehen — der Browser fragt dann von selbst /aog/js/… an.
+#
+#  Damit das funktioniert, muss der Aufruf auf einen Schraegstrich
+#  enden. Wer /aog ohne Schraegstrich eingibt, wuerde die
+#  Unterdateien unter / suchen; deshalb leitet die erste
+#  Middleware dorthin um.
+#
+#  Voraussetzung: ein laufender Traefik mit einem Einstiegspunkt
+#  "websecure" und einem Zertifikatsloeser "letsencrypt" sowie
+#  ein gemeinsames Netz (hier "traefik"). Heissen sie bei dir
+#  anders, nur die drei Stellen unten anpassen.
+# ═══════════════════════════════════════════════════════════
+services:
+  aog:
+    build: .
+    image: age-of-generation:neu
+    container_name: age-of-generation
+    restart: unless-stopped
+    environment:
+      # Traefik schneidet /aog bereits ab, deshalb bleibt BASE_PATH leer.
+      # Wer ohne StripPrefix arbeitet, setzt hier BASE_PATH=/aog.
+      - PORT=3000
+      - HOST=0.0.0.0
+    volumes:
+      # Benannter Datentraeger statt eines Ordners vom Wirt: so gehoert
+      # er dem Benutzer im Container und die Aufzeichnungen lassen sich
+      # auch wirklich schreiben. Wer die Dateien lieber direkt sehen
+      # will, nimmt "./daten:/app/daten" — dann muss der Ordner aber
+      # dem Benutzer 1000 gehoeren (chown -R 1000:1000 daten).
+      - aog-daten:/app/daten
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+
+      # ── Route: Domain + Unterpfad ──
+      - "traefik.http.routers.aog.rule=Host(`6idioten.ddns.net`) && PathPrefix(`/aog`)"
+      - "traefik.http.routers.aog.entrypoints=websecure"
+      - "traefik.http.routers.aog.tls=true"
+      - "traefik.http.routers.aog.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.aog.middlewares=aog-schraegstrich@docker,aog-abschneiden@docker"
+      - "traefik.http.services.aog.loadbalancer.server.port=3000"
+
+      # ── /aog  →  /aog/  (sonst zeigen die relativen Pfade ins Leere) ──
+      - "traefik.http.middlewares.aog-schraegstrich.redirectregex.regex=^https?://([^/]+)/aog$$"
+      - "traefik.http.middlewares.aog-schraegstrich.redirectregex.replacement=https://$${1}/aog/"
+      - "traefik.http.middlewares.aog-schraegstrich.redirectregex.permanent=true"
+
+      # ── Praefix abschneiden: das Spiel sieht / ──
+      - "traefik.http.middlewares.aog-abschneiden.stripprefix.prefixes=/aog"
+
+      # ── Nur http: falls kein TLS eingerichtet ist, diese Zeilen
+      #    statt der beiden tls-Zeilen oben verwenden ──
+      # - "traefik.http.routers.aog.entrypoints=web"
+
+volumes:
+  aog-daten:
+
+networks:
+  traefik:
+    external: true

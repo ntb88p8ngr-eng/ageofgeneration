@@ -97,7 +97,9 @@ js/
   sim.js       die Simulation: Einheiten, Bauten, Wirtschaft, Kampf
   ki.js        der Rechner als Gegner
   welt.js      Darstellung mit three.js
-  modelle.js   Gebaeude und Einheiten aus Kaesten und Kegeln
+  modelle.js   Gebaeude, Einheiten und Baeume aus Kaesten, Kegeln,
+               Zylindern und Kugeln — sechs Baumarten, damit ein Wald
+               nicht gestempelt aussieht
   kamera.js    freie Feldherrnkamera
   steuerung.js Maus und Tastatur
   hud.js       Leisten, Knoepfe, Minikarte
@@ -135,6 +137,19 @@ Unerkundetes Land wird schwarz gezeichnet, erkundetes aber unbeobachtetes
 gedaempft; fremde Einheiten verschwinden dort, fremde Gebaeude bleiben als
 Erinnerung stehen. Verbuendete teilen ihre Sicht.
 
+Damit der Nebel keine Treppenstufen bekommt, wird er nicht kachelweise
+gezeichnet: Das Sichtfeld wird zuerst weichgezeichnet, dann auf die Eckpunkte
+eines je Kachel unterteilten Gitters gelegt — den Rest erledigt die
+Grafikkarte, die zwischen Eckpunkten ohnehin ueberblendet. Die Raender sind
+dadurch weich und rund.
+
+### Warum der Boden fein gerastert aussieht
+
+Die Bodenfarbe kommt aus einer Textur mit acht Farbfeldern je Kachel, nicht aus
+den Eckpunkten. Die sichtbare Einteilung ist damit ein Achtel so gross wie eine
+Kachel, ohne dass ein einziges Dreieck mehr noetig waere. An den Kachelgrenzen
+werden die Toene anteilig gemischt, damit keine Kanten stehen bleiben.
+
 ---
 
 ## Betrieb
@@ -144,6 +159,39 @@ PORT=8080 node server.js          # anderer Port
 HOST=127.0.0.1 node server.js     # nur oertlich
 BASE_PATH=/spiel node server.js   # hinter einem Proxy in einem Unterpfad
 ```
+
+### Im Container, hinter Traefik
+
+`docker-compose.yml` faehrt das Spiel als Container hoch und meldet es bei
+einem laufenden Traefik an — erreichbar unter **https://6idioten.ddns.net/aog/**
+
+```
+docker compose up -d --build
+```
+
+Vorausgesetzt werden ein Traefik mit dem Einstiegspunkt `websecure`, einem
+Zertifikatsloeser `letsencrypt` und einem gemeinsamen Netz namens `traefik`.
+Heissen sie anders, sind es drei Zeilen in der Datei.
+
+Wie der Unterpfad funktioniert: Traefik nimmt `/aog` entgegen, schneidet das
+Praefix ab (`StripPrefix`) und reicht die Anfrage als `/` weiter. Das geht auf,
+weil im HTML ausschliesslich **relative** Pfade stehen — der Browser fragt von
+sich aus `/aog/js/…` und `/aog/api/…` an. Damit das aufgeht, muss die Adresse
+auf einen Schraegstrich enden; eine zweite Middleware leitet `/aog` deshalb auf
+`/aog/` um.
+
+Wer lieber ohne `StripPrefix` arbeitet, setzt im Container `BASE_PATH=/aog` —
+dann schneidet der Server den Pfad selbst ab. Beide Wege sind geprueft.
+
+Zum Ausprobieren ohne Traefik:
+
+```
+docker compose -f docker-compose.ohne-traefik.yml up -d --build   # localhost:3000
+```
+
+Die Aufzeichnungen liegen in einem benannten Datentraeger (`aog-daten`), damit
+sie ein neues Abbild ueberleben und der Benutzer im Container sie auch
+schreiben darf.
 
 Aufzeichnungen liegen unter `daten/replays/` (die achtzig neuesten bleiben
 erhalten). Der Ordner `daten/` wird nie ausgeliefert.

@@ -16,7 +16,8 @@
 import * as THREE from './vendor/three.module.js';
 import { FP, GEBAEUDE, EINHEITEN, FARBEN, BODEN } from './regeln.js';
 import { VORKOMMEN_LISTE } from './karte.js';
-import { gebaeudeModell, einheitModell, landModell, geschossModell } from './modelle.js';
+import { gebaeudeModell, einheitModell, landModell, geschossModell, BAUMARTEN } from './modelle.js';
+import { punktrausch } from './zufall.js';
 
 /** Hoehe einer Gelaendestufe in Welteinheiten (1 Einheit = 1 Kachel). */
 export const HOEHE = 0.42;
@@ -26,6 +27,15 @@ const WASSER_Y = 0.16;
    sonst verschwinden sie zwischen den Gebaeuden. Auf den Kampf
    hat das keinen Einfluss, die Simulation rechnet in Kacheln. */
 const EINHEIT_SKALA = 1.5;
+/* So oft wird jede Kachel im Gelaendenetz unterteilt. Mehr Punkte
+   heisst weichere Nebelkanten — zwei genuegen dafuer. */
+const UNTERTEILUNG = 2;
+/* So viele Farbfelder hat eine Kachel in der Bodentextur. Damit ist
+   die sichtbare Einteilung ein Achtel so gross wie eine Kachel. */
+const FEINHEIT = 8;
+/* Verteilung der Baumarten im Wald. */
+const BAUM_MISCHUNG = ['fichte', 'fichte', 'fichte', 'fichte', 'kiefer', 'kiefer',
+                       'eiche', 'eiche', 'birke', 'busch', 'totholz'];
 
 const BODENFARBE = {
   [BODEN.gras]:    0x5f8c3c,
@@ -59,10 +69,16 @@ export class Welt {
 
     /* Licht: hohe Sonne von schraeg vorn, dazu Himmelslicht, damit
        Schattenseiten nicht schwarz absaufen. */
-    const sonne = new THREE.DirectionalLight(0xfff2dc, 1.55);
+    const sonne = new THREE.DirectionalLight(0xfff2dc, 1.25);
     sonne.position.set(0.6, 1.0, 0.35);
     this.szene.add(sonne);
-    this.szene.add(new THREE.HemisphereLight(0xbfd8ef, 0x40502e, 1.0));
+    /* Zweites, schwaches Licht von der Gegenseite und ein kraeftiges
+       Himmelslicht: sonst saufen die vom Betrachter abgewandten
+       Hauswaende ab und jedes Gebaeude wirkt wie ein dunkler Klotz. */
+    const gegenlicht = new THREE.DirectionalLight(0xdce8ff, 0.35);
+    gegenlicht.position.set(-0.5, 0.4, -0.7);
+    this.szene.add(gegenlicht);
+    this.szene.add(new THREE.HemisphereLight(0xcfe2f2, 0x7a8a68, 1.15));
 
     this.gruppen = new Map();      // gebuendelte Zeichenaufrufe
     this.anzeige = new Map();      // gemerkte Blickrichtung je Einheit
@@ -76,15 +92,22 @@ export class Welt {
   }
 
   /* ─────────────── Gelaende ───────────────
-     Die Eckpunkte liegen auf dem Mittel der angrenzenden Kacheln,
-     dadurch werden Haenge weich. Die Farbe bleibt je Kachel gleich,
-     das ergibt die typische Feldereinteilung. */
+     Zwei getrennte Aufloesungen, und das mit Absicht:
+
+       * Das Netz wird je Kachel unterteilt (UNTERTEILUNG × UNTERTEILUNG).
+         Darauf sitzt der Nebel des Krieges als Eckpunktfarbe — weil die
+         Grafikkarte zwischen Eckpunkten weich ueberblendet, bekommt der
+         Nebel dadurch runde, weiche Raender statt Treppenstufen.
+
+       * Die Bodenfarbe kommt aus einer Textur mit FEINHEIT Feldern je
+         Kachel. Die sichtbare Karo-Einteilung wird dadurch achtmal
+         kleiner, ohne dass ein einziges Dreieck mehr noetig waere. */
 
   gelaendeBauen() {
     const k = this.sim.karte;
     const b = k.breite, h = k.hoehe;
 
-    /* Eckhoehen */
+    /* Eckhoehen: Mittel der angrenzenden Kacheln, dadurch weiche Haenge. */
     this.ecken = new Float32Array((b + 1) * (h + 1));
     for (let y = 0; y <= h; y++) {
       for (let x = 0; x <= b; x++) {
@@ -100,46 +123,117 @@ export class Welt {
       }
     }
 
-    const kacheln = b * h;
-    const pos = new Float32Array(kacheln * 18);
-    const far = new Float32Array(kacheln * 18);
-    const nor = new Float32Array(kacheln * 18);
-    this.gelaendeFarbenBasis = new Float32Array(kacheln * 18);
-
-    const eck = (x, y) => this.ecken[y * (b + 1) + x];
-    let o = 0;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < b; x++) {
-        const i = y * b + x;
-        const h00 = eck(x, y), h10 = eck(x + 1, y), h01 = eck(x, y + 1), h11 = eck(x + 1, y + 1);
-        /* Zwei Dreiecke, Reihenfolge gegen den Uhrzeigersinn von oben. */
-        const p = [
-          x, h00, y, x, h01, y + 1, x + 1, h10, y,
-          x + 1, h10, y, x, h01, y + 1, x + 1, h11, y + 1
-        ];
-        pos.set(p, o);
-        /* Farbton je Kachel leicht streuen, sonst wirkt alles wie Filz. */
-        const grund = BODENFARBE[k.boden[i]] != null ? BODENFARBE[k.boden[i]] : 0x5f8c3c;
-        const c = new THREE.Color(grund);
-        const streu = (((x * 73856093) ^ (y * 19349663)) & 15) / 15 - 0.5;
-        c.offsetHSL(0, 0, streu * 0.035);
-        for (let v = 0; v < 6; v++) {
-          far[o + v * 3] = c.r; far[o + v * 3 + 1] = c.g; far[o + v * 3 + 2] = c.b;
-        }
-        o += 18;
+    const S = UNTERTEILUNG;
+    const gb = b * S + 1, gh = h * S + 1;
+    const punkte = gb * gh;
+    const pos = new Float32Array(punkte * 3);
+    const uv = new Float32Array(punkte * 2);
+    const far = new Float32Array(punkte * 3).fill(1);
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gb; i++) {
+        const n = j * gb + i;
+        const wx = i / S, wz = j / S;
+        pos[n * 3] = wx;
+        pos[n * 3 + 1] = this.eckHoehe(wx, wz);
+        pos[n * 3 + 2] = wz;
+        uv[n * 2] = wx / b;
+        uv[n * 2 + 1] = wz / h;
       }
     }
-    this.gelaendeFarbenBasis.set(far);
+    const felder = (gb - 1) * (gh - 1);
+    const index = (punkte > 65535 ? new Uint32Array(felder * 6) : new Uint16Array(felder * 6));
+    let o = 0;
+    for (let j = 0; j < gh - 1; j++) {
+      for (let i = 0; i < gb - 1; i++) {
+        const a = j * gb + i, c = a + 1, d = a + gb, e = d + 1;
+        index[o++] = a; index[o++] = d; index[o++] = c;
+        index[o++] = c; index[o++] = d; index[o++] = e;
+      }
+    }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setAttribute('color', new THREE.BufferAttribute(far, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setIndex(new THREE.BufferAttribute(index, 1));
     geo.computeVertexNormals();
     this.gelaendeGeo = geo;
-    this.gelaende = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    this.gitterB = gb; this.gitterH = gh;
+
+    this.gelaende = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+      vertexColors: true, map: this.bodenTextur()
+    }));
     this.gelaende.frustumCulled = false;
     this.szene.add(this.gelaende);
+  }
+
+  /** Hoehe an einem Punkt des Eckgitters (bilinear zwischen Kachelecken). */
+  eckHoehe(x, z) {
+    const k = this.sim.karte, b = k.breite;
+    const gx = Math.min(k.breite - 1, Math.floor(x)), gz = Math.min(k.hoehe - 1, Math.floor(z));
+    const fx = x - gx, fz = z - gz;
+    const h00 = this.ecken[gz * (b + 1) + gx];
+    const h10 = this.ecken[gz * (b + 1) + gx + 1];
+    const h01 = this.ecken[(gz + 1) * (b + 1) + gx];
+    const h11 = this.ecken[(gz + 1) * (b + 1) + gx + 1];
+    return (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+  }
+
+  /**
+   * Bodentextur: je Kachel FEINHEIT × FEINHEIT Farbfelder. Der Ton
+   * streut von Feld zu Feld ein wenig und wird an den Kachelgrenzen
+   * mit dem Nachbarn gemischt — das ergibt eine Wiese aus vielen
+   * kleinen Flecken statt eines Schachbretts aus grossen.
+   */
+  bodenTextur() {
+    const k = this.sim.karte;
+    const T = FEINHEIT;
+    const tw = k.breite * T, th = k.hoehe * T;
+    const daten = new Uint8Array(tw * th * 4);
+    /* Die Farbwerte werden hier unmittelbar aus dem Hex-Wert genommen
+       und bleiben damit in sRGB. Ginge man ueber THREE.Color, laegen
+       sie linear vor, und die als sRGB gekennzeichnete Textur wuerde
+       ein zweites Mal umgerechnet — das ganze Gelaende waere zu dunkel. */
+    const grund = new Float32Array(k.breite * k.hoehe * 3);
+    for (let i = 0; i < k.breite * k.hoehe; i++) {
+      const hex = BODENFARBE[k.boden[i]] != null ? BODENFARBE[k.boden[i]] : 0x5f8c3c;
+      grund[i * 3] = (hex >> 16) & 255;
+      grund[i * 3 + 1] = (hex >> 8) & 255;
+      grund[i * 3 + 2] = hex & 255;
+    }
+    for (let ty = 0; ty < k.hoehe; ty++) {
+      for (let tx = 0; tx < k.breite; tx++) {
+        const i = ty * k.breite + tx;
+        for (let fy = 0; fy < T; fy++) {
+          for (let fx = 0; fx < T; fx++) {
+            /* Anteilig mit den Nachbarkacheln mischen, damit die
+               Kachelgrenzen nicht als Kanten stehen bleiben. */
+            const ax = (fx + 0.5) / T - 0.5, az = (fy + 0.5) / T - 0.5;
+            const nx = Math.min(k.breite - 1, Math.max(0, tx + Math.sign(ax)));
+            const nz = Math.min(k.hoehe - 1, Math.max(0, ty + Math.sign(az)));
+            const gx = Math.abs(ax) * 0.8, gz = Math.abs(az) * 0.8;
+            const j = ty * k.breite + nx, m = nz * k.breite + tx;
+            let r = grund[i * 3] * (1 - gx - gz) + grund[j * 3] * gx + grund[m * 3] * gz;
+            let g = grund[i * 3 + 1] * (1 - gx - gz) + grund[j * 3 + 1] * gx + grund[m * 3 + 1] * gz;
+            let bl = grund[i * 3 + 2] * (1 - gx - gz) + grund[j * 3 + 2] * gx + grund[m * 3 + 2] * gz;
+            /* Feine Streuung je Farbfeld. */
+            const streu = (punktrausch(tx * T + fx, ty * T + fy, 0x51fe) / 65535 - 0.5) * 34;
+            const o = ((ty * T + fy) * tw + tx * T + fx) * 4;
+            daten[o] = klemme255(r + streu);
+            daten[o + 1] = klemme255(g + streu);
+            daten[o + 2] = klemme255(bl + streu);
+            daten[o + 3] = 255;
+          }
+        }
+      }
+    }
+    const textur = new THREE.DataTexture(daten, tw, th, THREE.RGBAFormat);
+    textur.magFilter = THREE.NearestFilter;      // scharfe kleine Felder
+    textur.minFilter = THREE.LinearMipmapLinearFilter;
+    textur.generateMipmaps = true;
+    textur.colorSpace = THREE.SRGBColorSpace;
+    textur.needsUpdate = true;
+    return textur;
   }
 
   /* Wasser wird kachelweise gezeichnet und nicht als eine grosse
@@ -158,10 +252,8 @@ export class Welt {
     if (!kacheln.length) { this.wasser = null; return; }
 
     const pos = new Float32Array(kacheln.length * 18);
-    const far = new Float32Array(kacheln.length * 18);
+    const far = new Float32Array(kacheln.length * 18).fill(1);
     const nor = new Float32Array(kacheln.length * 18);
-    this.wasserBasis = new Float32Array(kacheln.length * 18);
-    const c = new THREE.Color(0x2f6d8c);
     for (let n = 0; n < kacheln.length; n++) {
       const i = kacheln[n];
       const x = i % k.breite, y = (i / k.breite) | 0;
@@ -170,19 +262,15 @@ export class Welt {
         x, WASSER_Y, y, x, WASSER_Y, y + 1, x + 1, WASSER_Y, y,
         x + 1, WASSER_Y, y, x, WASSER_Y, y + 1, x + 1, WASSER_Y, y + 1
       ], o);
-      for (let v = 0; v < 6; v++) {
-        far[o + v * 3] = c.r; far[o + v * 3 + 1] = c.g; far[o + v * 3 + 2] = c.b;
-        nor[o + v * 3] = 0; nor[o + v * 3 + 1] = 1; nor[o + v * 3 + 2] = 0;
-      }
+      for (let v = 0; v < 6; v++) { nor[o + v * 3 + 1] = 1; }
     }
-    this.wasserBasis.set(far);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(far, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     this.wasserGeo = geo;
     this.wasser = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-      vertexColors: true, transparent: true, opacity: 0.85
+      color: 0x2f6d8c, vertexColors: true, transparent: true, opacity: 0.85
     }));
     this.wasser.frustumCulled = false;
     this.wasser.renderOrder = 1;
@@ -435,8 +523,11 @@ export class Welt {
         if (!v || k.menge[i] <= 0) continue;
         if (this.spielerId != null && this.sichtbar(x, y) === 0) continue;
         let art = VORKOMMEN_LISTE[v - 1];
-        /* Zwei Baumformen im Wechsel, damit der Wald nicht gestempelt aussieht. */
-        if (art === 'baum' && ((x * 7 + y * 13) & 3) === 0) art = 'baum2';
+        /* Welche Baumart auf welcher Kachel steht, haengt allein an den
+           Koordinaten — so sieht derselbe Wald immer gleich aus, ist
+           aber nicht gestempelt. Nadelbaeume ueberwiegen, Totholz ist
+           selten. */
+        if (art === 'baum') art = BAUM_MISCHUNG[punktrausch(x, y, 0x7a11) % BAUM_MISCHUNG.length];
         let liste = listen.get(art);
         if (!liste) { liste = []; listen.set(art, liste); }
         const streuX = (((x * 374761393 + y * 668265263) >>> 8) & 255) / 255 - 0.5;
@@ -480,39 +571,88 @@ export class Welt {
   }
 
   /* ─────────────── Nebel des Krieges ───────────────
-     Statt einer zweiten Ebene wird die Gelaendefarbe abgedunkelt:
-     unerforscht ganz schwarz, erforscht aber unbeobachtet gedaempft. */
+     Der Nebel steckt in den Eckpunktfarben des Gelaendes. Weil die
+     Grafikkarte zwischen Eckpunkten ueberblendet und das Sichtfeld
+     vorher weichgezeichnet wird, bekommt er runde Raender statt
+     der Treppenstufen, die ein kachelweiser Nebel hinterlaesst. */
 
   nebelZeichnen() {
-    if (this.spielerId == null) return;
-    const k = this.sim.karte;
+    if (this.spielerId == null) return;    // Zuschauer sehen alles
+    const k = this.sim.karte, b = k.breite, h = k.hoehe;
+
+    if (!this.sichtFeld) {
+      this.sichtFeld = new Float32Array(b * h);
+      this.sichtWeich = new Float32Array(b * h);
+    }
+    /* 1. Sichtstufe je Kachel: gesehen, erinnert, unbekannt. */
+    for (let i = 0; i < b * h; i++) {
+      const x = i % b, y = (i / b) | 0;
+      const s = this.sichtbar(x, y);
+      this.sichtFeld[i] = s === 2 ? 1 : (s === 1 ? 0.5 : 0.06);
+    }
+    /* 2. Weichzeichnen — das nimmt die Zacken aus den Sichtkreisen. */
+    const f = this.sichtFeld, w = this.sichtWeich;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < b; x++) {
+        let summe = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= b) continue;
+            const gewicht = (dx === 0 && dy === 0) ? 4 : 1;
+            summe += f[yy * b + xx] * gewicht; n += gewicht;
+          }
+        }
+        w[y * b + x] = summe / n;
+      }
+    }
+
+    /* 3. Auf die Eckpunkte des feinen Gitters uebertragen. */
+    const S = UNTERTEILUNG;
+    const gb = this.gitterB, gh = this.gitterH;
     const farben = this.gelaendeGeo.attributes.color;
-    const basis = this.gelaendeFarbenBasis;
     const arr = farben.array;
-    for (let y = 0; y < k.hoehe; y++) {
-      for (let x = 0; x < k.breite; x++) {
-        const i = y * k.breite + x;
-        const s = this.sichtbar(x, y);
-        const f = s === 2 ? 1 : (s === 1 ? 0.5 : 0.06);
-        const o = i * 18;
-        for (let v = 0; v < 18; v++) arr[o + v] = basis[o + v] * f;
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gb; i++) {
+        const v = this.sichtWert(i / S, j / S);
+        const o = (j * gb + i) * 3;
+        arr[o] = v; arr[o + 1] = v; arr[o + 2] = v;
       }
     }
     farben.needsUpdate = true;
 
-    /* Dasselbe fuer die Wasserkacheln. */
+    /* 4. Dasselbe fuer die Wasserkacheln, ebenfalls ueber die Ecken. */
     if (this.wasser && this.wasserKacheln) {
       const wf = this.wasserGeo.attributes.color;
       const wa = wf.array;
       for (let n = 0; n < this.wasserKacheln.length; n++) {
         const i = this.wasserKacheln[n];
-        const s = this.sichtbarFuer(this.spielerId, i % k.breite, (i / k.breite) | 0);
-        const f = s === 2 ? 1 : (s === 1 ? 0.5 : 0.06);
+        const x = i % b, y = (i / b) | 0;
+        const e00 = this.sichtWert(x, y), e01 = this.sichtWert(x, y + 1);
+        const e10 = this.sichtWert(x + 1, y), e11 = this.sichtWert(x + 1, y + 1);
+        const ecken = [e00, e01, e10, e10, e01, e11];
         const o = n * 18;
-        for (let v = 0; v < 18; v++) wa[o + v] = this.wasserBasis[o + v] * f;
+        for (let v = 0; v < 6; v++) {
+          arr2(wa, o + v * 3, ecken[v]);
+        }
       }
       wf.needsUpdate = true;
     }
+  }
+
+  /** Sichtwert an einer Weltstelle — weich zwischen den Kachelmitten. */
+  sichtWert(wx, wz) {
+    const k = this.sim.karte, b = k.breite, h = k.hoehe;
+    const x = Math.min(b - 1.001, Math.max(0, wx - 0.5));
+    const z = Math.min(h - 1.001, Math.max(0, wz - 0.5));
+    const x0 = x | 0, z0 = z | 0;
+    const fx = x - x0, fz = z - z0;
+    const w = this.sichtWeich;
+    const a = w[z0 * b + x0], c = w[z0 * b + x0 + 1];
+    const d = w[(z0 + 1) * b + x0], e = w[(z0 + 1) * b + x0 + 1];
+    return (a * (1 - fx) + c * fx) * (1 - fz) + (d * (1 - fx) + e * fx) * fz;
   }
 
   /* ─────────────── Auswahl und Balken ─────────────── */
@@ -730,3 +870,9 @@ export class Welt {
     this.kamera.updateProjectionMatrix();
   }
 }
+
+/** Setzt drei gleiche Werte in ein Farbfeld. */
+function arr2(feld, o, v) { feld[o] = v; feld[o + 1] = v; feld[o + 2] = v; }
+
+/** Auf einen Byte-Farbwert begrenzen. */
+function klemme255(v) { return v < 0 ? 0 : (v > 255 ? 255 : v | 0); }

@@ -1,0 +1,16 @@
+# Zum Ausprobieren ohne Traefik: das Spiel haengt einfach auf Port 3000.
+#     docker compose -f docker-compose.ohne-traefik.yml up -d --build
+#     →  http://localhost:3000
+services:
+  aog:
+    build: .
+    image: age-of-generation:neu
+    container_name: age-of-generation
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - aog-daten:/app/daten
+
+volumes:
+  aog-daten:
