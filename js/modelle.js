@@ -45,7 +45,11 @@ export const FARBE = {
   dunkel:      0x2f2f2d,
   gold:        0xd9b44a,
   fenster:     0x2a2620,
-  wasser:      0x2f6d8c
+  wasser:      0x2f6d8c,
+  schiefer:    0x5c6670,
+  kupfer:      0x4f8f7d,
+  schindel:    0x6b533a,
+  ziegelHell:  0xb4573c
 };
 
 /* ─────────────── Baukasten ───────────────
@@ -209,6 +213,17 @@ class Bau {
     this.zylinder(x, y + hoehe / 2, z, 0.035, 0.035, hoehe, 6, FARBE.holzDunkel);
     this.kugel(x, y + hoehe + 0.05, z, 0.06, FARBE.gold, 6);
     this.kasten(x + 0.17, y + hoehe - 0.18, z, 0.32, 0.24, 0.04, null);
+    return this;
+  }
+
+  /** Kleiner Wimpel — traegt die Spielerfarbe, ohne das ganze Dach
+      einzufaerben. Damit bleibt ein Dorf ein Dorf und faerbt sich
+      nicht durchgehend blau oder rot. */
+  wimpel(x, y, z, hoehe) {
+    this.zylinder(x, y + hoehe / 2, z, 0.025, 0.03, hoehe, 5, FARBE.holzDunkel);
+    this.kugel(x, y + hoehe + 0.03, z, 0.04, FARBE.gold, 5);
+    this.dreieck(x + 0.11, y + hoehe - 0.22, z, 0.22, 0.2, null, Math.PI / 2);
+    this.kasten(x + 0.11, y + hoehe - 0.12, z, 0.22, 0.03, 0.03, null, Math.PI / 2);
     return this;
   }
 
@@ -518,7 +533,7 @@ export function gebaeudeModell(typ, volk) {
       b.kasten(0, 0.46, 0, g - 0.55, 0.72, g - 0.7, FARBE.putz);
       b.fachwerk(0, 0.46, (g - 0.7) / 2, g - 0.55, 0.72, 0.04, 'z');
       b.fachwerk(0, 0.46, -(g - 0.7) / 2, g - 0.55, 0.72, 0.04, 'z');
-      b.giebel(0, 0.82, 0, g - 0.45, g - 0.6, 0.66, null);
+      b.giebel(0, 0.82, 0, g - 0.45, g - 0.6, 0.66, FARBE.ziegel);
       b.tuer(0, 0.1, (g - 0.7) / 2 - 0.01, 0.26, 0.44, 'z');
       b.fenster(-0.4, 0.58, (g - 0.7) / 2, 0.18, 0.2, 'z');
       b.fenster(0.4, 0.58, (g - 0.7) / 2, 0.18, 0.2, 'z');
@@ -538,8 +553,8 @@ export function gebaeudeModell(typ, volk) {
       }
       b.fenster(0, 0.8, 0.6, 0.16, 0.2, 'z');
       b.tuer(0, 0.2, 0.58, 0.24, 0.4, 'z');
-      b.kegel(0, 1.32, 0, 0.78, 0.56, 8, null);
-      b.kugel(0, 1.62, 0, 0.09, FARBE.holzDunkel, 6);
+      b.kegel(0, 1.32, 0, 0.78, 0.56, 8, FARBE.schindel);
+      b.wimpel(0, 1.58, 0, 0.42);
       /* Fluegelkreuz mit Segeln */
       b.zylinder(0, 1.0, 0.78, 0.06, 0.06, 0.16, 6, FARBE.holzDunkel, Math.PI / 2);
       for (let i = 0; i < 4; i++) {
@@ -555,30 +570,50 @@ export function gebaeudeModell(typ, volk) {
       break;
     }
 
-    /* ─────────────── Farm ─────────────── */
+    /* ─────────────── Farm ───────────────
+       Ein Weizenfeld, kein gruener Rasen: Erdreich mit Furchen,
+       darauf einzelne Halme mit Aehre — reihenweise gesetzt, in
+       Hoehe und Neigung leicht gestreut, damit es nach Feld
+       aussieht und nicht nach Bordüre. Die Streuung kommt aus den
+       Zaehlern, nicht aus dem Zufall: so sieht jeder Acker gleich
+       aus und niemand rechnet beim Zeichnen etwas nach. */
     case 'farm': {
-      b.kasten(0, 0.03, 0, g - 0.1, 0.06, g - 0.1, 0x6b4a2a);
-      /* Furchen mit Getreidebueschen */
-      for (let i = 0; i < 6; i++) {
-        const z = -g / 2 + 0.4 + i * (g - 0.8) / 5;
-        b.kasten(0, 0.09, z, g - 0.35, 0.06, 0.2, i % 2 ? 0x8a6a3a : 0x7d5c31);
-        for (let j = 0; j < 5; j++) {
-          const x = -g / 2 + 0.45 + j * (g - 0.9) / 4;
-          b.kegel(x, 0.2, z, 0.11, 0.26, 5, i % 2 ? 0xc9b356 : 0xd6c163);
+      b.kasten(0, 0.03, 0, g - 0.1, 0.06, g - 0.1, 0x8a6b3a);
+      const reihen = 8, jeReihe = 9;
+      const spanne = g - 0.7;
+      for (let r = 0; r < reihen; r++) {
+        const z = -spanne / 2 + r * spanne / (reihen - 1);
+        /* Furche unter der Reihe */
+        b.kasten(0, 0.08, z, g - 0.28, 0.05, 0.12, r % 2 ? 0x9a7a42 : 0x8a6b3a);
+        for (let i = 0; i < jeReihe; i++) {
+          const versatz = (r % 2) ? 0.07 : -0.07;
+          const x = -spanne / 2 + i * spanne / (jeReihe - 1) + versatz;
+          const streu = (r * 7 + i * 13) % 5;
+          const hoehe = 0.34 + streu * 0.04;
+          const neigung = (((r * 5 + i * 11) % 7) - 3) * 0.045;
+          const halm = [0xd2be5c, 0xdcc868, 0xc8b453][streu % 3];
+          const aehre = [0xf0d34f, 0xe6c63f, 0xf7de6a][(streu + i) % 3];
+          b.zylinder(x, 0.1 + hoehe / 2, z, 0.014, 0.02, hoehe, 3, halm, 0, neigung);
+          /* Aehre am oberen Ende, in Neigungsrichtung versetzt */
+          const kx = x + Math.sin(neigung) * hoehe * 0.55;
+          b.kegel(kx, 0.12 + hoehe + 0.08, z, 0.07, 0.22, 5, aehre, 0, neigung);
         }
       }
-      /* Eckpfaehle mit Seil */
+      /* Eckpfaehle mit gespanntem Seil */
       for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         b.kasten(sx * (g / 2 - 0.12), 0.18, sz * (g / 2 - 0.12), 0.07, 0.36, 0.07, FARBE.holz);
       }
-      for (const s of [-1, 1]) {
-        b.kasten(0, 0.3, s * (g / 2 - 0.12), g - 0.24, 0.03, 0.03, FARBE.holzHell);
-        b.kasten(s * (g / 2 - 0.12), 0.3, 0, 0.03, 0.03, g - 0.24, FARBE.holzHell);
+      for (const t of [-1, 1]) {
+        b.kasten(0, 0.3, t * (g / 2 - 0.12), g - 0.24, 0.03, 0.03, FARBE.holzHell);
+        b.kasten(t * (g / 2 - 0.12), 0.3, 0, 0.03, 0.03, g - 0.24, FARBE.holzHell);
       }
-      /* Vogelscheuche */
-      b.kasten(g / 2 - 0.5, 0.32, -g / 2 + 0.5, 0.05, 0.6, 0.05, FARBE.holzDunkel);
-      b.kasten(g / 2 - 0.5, 0.5, -g / 2 + 0.5, 0.4, 0.05, 0.05, FARBE.holzDunkel);
-      b.kugel(g / 2 - 0.5, 0.66, -g / 2 + 0.5, 0.1, FARBE.stroh, 6);
+      /* Vogelscheuche mit Strohhut und ausgebreiteten Armen */
+      const vx = g / 2 - 0.45, vz = -g / 2 + 0.45;
+      b.kasten(vx, 0.34, vz, 0.05, 0.68, 0.05, FARBE.holzDunkel);
+      b.kasten(vx, 0.54, vz, 0.46, 0.05, 0.05, FARBE.holzDunkel);
+      b.kasten(vx, 0.5, vz, 0.2, 0.24, 0.12, 0x8a6a3a);
+      b.kugel(vx, 0.7, vz, 0.09, FARBE.stroh, 6);
+      b.zylinder(vx, 0.76, vz, 0.15, 0.15, 0.03, 8, FARBE.strohDunkel);
       break;
     }
 
@@ -591,7 +626,7 @@ export function gebaeudeModell(typ, volk) {
         b.kasten(sx * (g - 0.5) / 2, 0.42, 0, 0.1, 0.76, g - 0.9, FARBE.holz);
         b.zylinder(sx * (g - 0.6) / 2, 0.45, (g - 0.9) / 2, 0.07, 0.08, 0.9, 6, FARBE.holzHell);
       }
-      b.platte(0, 0.92, 0.06, g - 0.25, g - 0.7, null, 0, -0.22);
+      b.platte(0, 0.92, 0.06, g - 0.25, g - 0.7, FARBE.schindel, 0, -0.22);
       b.kasten(0, 0.86, -(g - 0.9) / 2, g - 0.4, 0.09, 0.12, FARBE.balken);
       /* Lagergut */
       b.stapel(-0.35, 0.08, -0.25, 6, 0.8, 0.075);
@@ -610,7 +645,7 @@ export function gebaeudeModell(typ, volk) {
       b.kasten(0, 0.05, 0, g - 0.3, 0.1, g - 0.3, FARBE.steinDunkel);
       b.kasten(0, 0.5, -0.25, g - 0.6, 0.8, g - 1.1, FARBE.putzGrau);
       b.fachwerk(0, 0.5, -0.25 + (g - 1.1) / 2, g - 0.6, 0.8, 0.04, 'z');
-      b.giebel(0, 0.9, -0.25, g - 0.5, g - 1.0, 0.78, null);
+      b.giebel(0, 0.9, -0.25, g - 0.5, g - 1.0, 0.78, FARBE.ziegel);
       b.tuer(0, 0.1, -0.25 + (g - 1.1) / 2 - 0.02, 0.4, 0.6, 'z');
       b.fenster(-0.75, 0.72, -0.25 + (g - 1.1) / 2, 0.2, 0.22, 'z');
       b.fenster(0.75, 0.72, -0.25 + (g - 1.1) / 2, 0.2, 0.22, 'z');
@@ -633,13 +668,14 @@ export function gebaeudeModell(typ, volk) {
     case 'schuetzenstand': {
       b.kasten(0, 0.05, 0, g - 0.3, 0.1, g - 0.3, FARBE.steinDunkel);
       b.kasten(0, 0.44, -0.45, g - 0.7, 0.68, g - 1.6, FARBE.holz);
-      b.giebel(0, 0.78, -0.45, g - 0.6, g - 1.5, 0.62, null);
+      b.giebel(0, 0.78, -0.45, g - 0.6, g - 1.5, 0.62, FARBE.schindel);
       b.tuer(0, 0.1, -0.45 + (g - 1.6) / 2 - 0.02, 0.34, 0.5, 'z');
       /* Ueberdachter Schiessstand */
       for (const sx of [-1, 1]) {
         b.zylinder(sx * (g / 2 - 0.35), 0.42, 0.35, 0.07, 0.08, 0.84, 6, FARBE.holz);
       }
-      b.platte(0, 0.9, 0.35, g - 0.5, 0.8, null, 0, -0.18);
+      b.platte(0, 0.9, 0.35, g - 0.5, 0.8, FARBE.schindel, 0, -0.18);
+      b.wimpel(-g / 2 + 0.3, 0.1, -g / 2 + 0.3, 0.8);
       /* Zielscheiben */
       for (const [dx, dz] of [[0.55, g / 2 - 0.35], [-0.55, g / 2 - 0.35]]) {
         b.kasten(dx, 0.25, dz, 0.07, 0.5, 0.07, FARBE.holz);
@@ -660,7 +696,8 @@ export function gebaeudeModell(typ, volk) {
     case 'stall': {
       b.kasten(0, 0.05, 0, g - 0.3, 0.1, g - 0.3, FARBE.steinDunkel);
       b.kasten(-0.35, 0.46, 0, g - 1.3, 0.72, g - 0.7, FARBE.holz);
-      b.giebel(-0.35, 0.82, 0, g - 1.2, g - 0.6, 0.7, null);
+      b.giebel(-0.35, 0.82, 0, g - 1.2, g - 0.6, 0.7, FARBE.stroh);
+      b.wimpel(-g / 2 + 0.3, 0.1, -g / 2 + 0.3, 0.8);
       /* Stalltueren */
       for (const s of [-1, 1]) {
         b.kasten(-0.35 + (g - 1.3) / 2 - 0.02, 0.34, s * 0.55, 0.05, 0.48, 0.42, FARBE.holzDunkel);
@@ -686,7 +723,7 @@ export function gebaeudeModell(typ, volk) {
         b.kasten(sx * (g / 2 - 0.55), 1.2, sz * (g / 2 - 0.35), 0.35, 0.09, 0.09, FARBE.balken, 0, 0, sx * 0.7);
       }
       for (const sz of [-1, 1]) b.kasten(0, 1.3, sz * (g / 2 - 0.35), g - 0.5, 0.12, 0.12, FARBE.balken);
-      b.giebel(0, 1.36, 0, g - 0.3, g - 0.5, 0.6, null, true);
+      b.giebel(0, 1.36, 0, g - 0.3, g - 0.5, 0.6, FARBE.schindel, true);
       /* Werkstueck: halbfertige Ramme */
       b.zylinder(0, 0.5, 0, 0.16, 0.16, 1.5, 8, FARBE.holzHell, 0, Math.PI / 2);
       b.zylinder(0.72, 0.5, 0, 0.19, 0.19, 0.14, 8, FARBE.eisen, 0, Math.PI / 2);
@@ -705,16 +742,19 @@ export function gebaeudeModell(typ, volk) {
       b.kasten(0, 0.06, 0, g - 0.3, 0.12, g - 0.3, 0xa89b80);
       /* Drei Buden mit gestreiften Planen */
       const buden = [[-0.75, -0.7, 0], [0.8, -0.55, 0.3], [-0.1, 0.8, -0.4]];
-      for (const [bx, bz, dreh] of buden) {
+      /* Drei Planen: Leinen, rot gestreift und eine in der
+         Spielerfarbe — das genuegt, um den Markt zuzuordnen. */
+      const planen = [FARBE.stoff, 0xb4573c, null];
+      buden.forEach(([bx, bz, dreh], nummer) => {
         b.kasten(bx, 0.34, bz, 0.8, 0.44, 0.55, FARBE.holz, dreh);
         b.kasten(bx, 0.58, bz, 0.86, 0.06, 0.62, FARBE.holzHell, dreh);
         for (const sx of [-1, 1]) b.kasten(bx + sx * 0.36, 0.72, bz - 0.24, 0.05, 0.32, 0.05, FARBE.holz, dreh);
-        b.platte(bx, 0.9, bz - 0.06, 0.98, 0.75, null, dreh, -0.25);
+        b.platte(bx, 0.9, bz - 0.06, 0.98, 0.75, planen[nummer], dreh, -0.25);
         /* Waren */
         b.halbkugel(bx - 0.2, 0.58, bz + 0.1, 0.11, 0xc0392b, 6);
         b.halbkugel(bx + 0.05, 0.58, bz + 0.12, 0.1, 0xd8b657, 6);
         b.halbkugel(bx + 0.26, 0.58, bz + 0.08, 0.1, 0x4c7a34, 6);
-      }
+      });
       /* Waage in der Mitte */
       b.kasten(0.2, 0.4, 0.05, 0.06, 0.56, 0.06, FARBE.holzDunkel);
       b.kasten(0.2, 0.66, 0.05, 0.5, 0.04, 0.04, FARBE.eisen);
@@ -729,7 +769,7 @@ export function gebaeudeModell(typ, volk) {
       b.kasten(0, 0.06, 0, g - 0.3, 0.12, g - 0.3, FARBE.stein);
       /* Kirchenschiff */
       b.kasten(0.2, 0.62, 0, g - 1.3, 1.0, g - 1.1, FARBE.putz);
-      b.giebel(0.2, 1.12, 0, g - 1.2, g - 1.0, 0.8, null);
+      b.giebel(0.2, 1.12, 0, g - 1.2, g - 1.0, 0.8, FARBE.schiefer);
       /* Rundbogenfenster */
       for (const dz of [-0.55, 0, 0.55]) {
         b.fenster(0.2 + (g - 1.3) / 2, 0.72, dz, 0.22, 0.34, 'x');
@@ -743,7 +783,7 @@ export function gebaeudeModell(typ, volk) {
         b.fenster(tx + s * 0.32, 1.55, 0, 0.16, 0.28, 'x');
         b.fenster(tx, 1.55, s * 0.32, 0.16, 0.28, 'z');
       }
-      b.kegel(tx, 2.28, 0, 0.5, 0.72, 6, null);
+      b.kegel(tx, 2.28, 0, 0.5, 0.72, 6, FARBE.schiefer);
       b.kasten(tx, 2.78, 0, 0.05, 0.34, 0.05, FARBE.gold);
       b.kasten(tx, 2.86, 0, 0.22, 0.05, 0.05, FARBE.gold);
       /* Kreuzgang mit Saeulen */
@@ -770,7 +810,7 @@ export function gebaeudeModell(typ, volk) {
       b.kegel(0, 1.42, g / 2 - 0.45, 1.3, 0.34, 3, FARBE.putzGrau, 0, Math.PI / 2);
       /* Kuppel */
       b.zylinder(0, 1.34, -0.2, 0.62, 0.72, 0.3, 12, FARBE.steinHell);
-      b.halbkugel(0, 1.48, -0.2, 0.62, null, 12);
+      b.halbkugel(0, 1.48, -0.2, 0.62, FARBE.kupfer, 12);
       b.kugel(0, 2.14, -0.2, 0.1, FARBE.gold, 7);
       /* Fenster und Buecherstapel */
       for (const s of [-1, 1]) b.fenster(s * 0.85, 0.85, -0.2 + (g - 1.3) / 2, 0.24, 0.36, 'z');

@@ -99,7 +99,8 @@ js/
   welt.js      Darstellung mit three.js
   modelle.js   Gebaeude, Einheiten und Baeume aus Kaesten, Kegeln,
                Zylindern und Kugeln — sechs Baumarten, damit ein Wald
-               nicht gestempelt aussieht
+               nicht gestempelt aussieht, und Aecker aus einzelnen
+               Weizenhalmen
   kamera.js    freie Feldherrnkamera
   steuerung.js Maus und Tastatur
   hud.js       Leisten, Knoepfe, Minikarte
@@ -142,6 +143,15 @@ gezeichnet: Das Sichtfeld wird zuerst weichgezeichnet, dann auf die Eckpunkte
 eines je Kachel unterteilten Gitters gelegt — den Rest erledigt die
 Grafikkarte, die zwischen Eckpunkten ohnehin ueberblendet. Die Raender sind
 dadurch weich und rund.
+
+### Wo die Spielerfarbe auftaucht
+
+Nicht ueberall — sonst faerbt sich ein Dorf durchgehend blau oder rot und
+sieht nach Spielbrett aus statt nach Siedlung. Die Farbe tragen nur
+Dorfzentrum, Burg, Turm und Tor sowie kleine Wimpel an den Militaergebaeuden;
+alles andere hat den Baustoff, der dazugehoert: Ziegel, Stroh, Holzschindeln,
+Schiefer, Kupfer. Zum Zuordnen genuegt das, weil Einheiten ihre Farbe voll
+tragen und die Minikarte ohnehin nach Spielern einfaerbt.
 
 ### Warum der Boden fein gerastert aussieht
 
