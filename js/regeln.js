@@ -115,7 +115,8 @@ export const FARBEN = [
   { id: 4, name: 'Tuerkis',hex: 0x27a8a8 },
   { id: 5, name: 'Lila',   hex: 0x8a49b8 },
   { id: 6, name: 'Grau',   hex: 0x9aa0a6 },
-  { id: 7, name: 'Orange', hex: 0xdd7722 }
+  { id: 7, name: 'Orange', hex: 0xdd7722 },
+  { id: 8, name: 'Rosa',   hex: 0xd4589a }
 ];
 
 /* ─────────────── Kachelarten ─────────────── */
@@ -132,13 +133,18 @@ export const VORKOMMEN = {
   wild:   { id: 'wild',   rohstoff: 'nahrung', menge: 140, name: 'Wild' },
   schaf:  { id: 'schaf',  rohstoff: 'nahrung', menge: 100, name: 'Schaf' },
   gold:   { id: 'gold',   rohstoff: 'gold',    menge: 800, name: 'Goldader' },
-  stein:  { id: 'stein',  rohstoff: 'stein',   menge: 350, name: 'Steinbruch' }
+  stein:  { id: 'stein',  rohstoff: 'stein',   menge: 350, name: 'Steinbruch' },
+  fisch:  { id: 'fisch',  rohstoff: 'nahrung', menge: 250, name: 'Fischgrund', wasser: true }
 };
 
 /** Wieviel ein Dorfbewohner je Sekunde von einer Quelle holt. */
 export const SAMMELTEMPO = {
-  baum: 0.39, beere: 0.31, wild: 0.41, schaf: 0.33, gold: 0.38, stein: 0.36, acker: 0.37
+  baum: 0.39, beere: 0.31, wild: 0.41, schaf: 0.33, gold: 0.38, stein: 0.36, acker: 0.37,
+  fisch: 0.43
 };
+/* Ein Fischerboot traegt mehr als ein Dorfbewohner — der Weg zum
+   Hafen ist schliesslich laenger. */
+export const TRAGKRAFT_BOOT = 15;
 /** So viel traegt ein Dorfbewohner, bevor er abliefert. */
 export const TRAGKRAFT = 10;
 
@@ -256,6 +262,21 @@ export const GEBAEUDE = {
     ruestung: { nah: 8, fern: 10 }, sicht: 2, zeitalter: 1, kette: true,
     beschreibung: 'Haelt auf, was nicht klettern kann. Mit gedrueckter Maustaste in Reihe ziehen.'
   },
+  bruecke: {
+    id: 'bruecke', name: 'Bruecke', taste: 'B',
+    kosten: { holz: 40 }, bauzeit: 14, groesse: 1, hp: 800,
+    ruestung: { nah: 3, fern: 6 }, sicht: 3, zeitalter: 0, kette: true,
+    aufWasser: true, begehbar: true,
+    beschreibung: 'Ueberquert Wasser. Nur auf Wasserfeldern zu bauen, die an Land oder an eine andere Bruecke grenzen. Mit gedrueckter Maustaste in Reihe ziehen.'
+  },
+  hafen: {
+    id: 'hafen', name: 'Hafen', taste: 'H',
+    kosten: { holz: 150 }, bauzeit: 45, groesse: 3, hp: 1400,
+    ruestung: { nah: 0, fern: 7 }, sicht: 8, zeitalter: 0, amUfer: true,
+    abgabe: ['nahrung', 'holz', 'gold', 'stein'],
+    produziert: ['fischerboot', 'transporter', 'galeere'],
+    beschreibung: 'Muss ans Ufer. Baut Schiffe, nimmt den Fang der Fischerboote an und liefert Rohstoffe wie ein Lager.'
+  },
   tor: {
     id: 'tor', name: 'Tor', taste: 'X',
     kosten: { stein: 30 }, bauzeit: 30, groesse: 1, hp: 1300,
@@ -355,6 +376,30 @@ export const EINHEITEN = {
     ruestung: { nah: 1, fern: 150 }, zeitalter: 3, bonus: { gebaeude: 200 },
     beschreibung: 'Reisst Burgen aus zwoelf Kacheln Entfernung nieder. Langsam wie ein Amtsweg.'
   },
+  /* ── Schiffe ──
+     Sie fahren nur auf Wasser, brauchen einen Hafen und koennen
+     nicht an Land. Der Transporter traegt Landeinheiten ueber
+     Fluesse und Meerengen. */
+  fischerboot: {
+    id: 'fischerboot', name: 'Fischerboot', taste: 'F', klasse: 'schiff', wasser: true,
+    kosten: { holz: 75 }, zeit: 40, hp: 60, bev: 1, tempo: 1.1, sicht: 5,
+    angriff: null, ruestung: { nah: 0, fern: 4 }, zeitalter: 0, kannSammeln: true, nurFisch: true,
+    beschreibung: 'Faengt Fisch und bringt ihn in den Hafen. Traegt mehr als ein Dorfbewohner.'
+  },
+  transporter: {
+    id: 'transporter', name: 'Transportschiff', taste: 'T', klasse: 'schiff', wasser: true,
+    kosten: { holz: 125 }, zeit: 45, hp: 150, bev: 1, tempo: 1.45, sicht: 5,
+    angriff: null, ruestung: { nah: 0, fern: 6 }, zeitalter: 0, plaetze: 8,
+    beschreibung: 'Nimmt bis zu acht Landeinheiten auf. Rechtsklick auf das Schiff laedt ein, Rechtsklick ans Ufer laedt aus.'
+  },
+  galeere: {
+    id: 'galeere', name: 'Galeere', taste: 'G', klasse: 'schiff', wasser: true,
+    kosten: { holz: 90, gold: 30 }, zeit: 60, hp: 130, bev: 1, tempo: 1.43, sicht: 7,
+    angriff: { art: 'fern', schaden: 6, reichweite: 5, tempo: 3.0, flugzeit: 0.4 },
+    ruestung: { nah: 0, fern: 6 }, zeitalter: 1, bonus: { schiff: 4 },
+    beschreibung: 'Kriegsschiff. Beherrscht das Wasser und beschiesst auch das Ufer.'
+  },
+
   /* ── Spezialeinheiten aus der Burg ── */
   wurfaxt: {
     id: 'wurfaxt', name: 'Wurfaxtwerfer', taste: 'Y', klasse: 'fussvolk', volk: 'franken',

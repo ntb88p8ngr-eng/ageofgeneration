@@ -13,20 +13,47 @@ import { Zufall, rauschfeld, klemme, abstand2 } from './zufall.js';
 import { BODEN, BODEN_BEGEHBAR, VORKOMMEN } from './regeln.js';
 
 /** Reihenfolge der Vorkommen — die Zahl steht im Kartenfeld. */
-export const VORKOMMEN_LISTE = ['baum', 'beere', 'wild', 'schaf', 'gold', 'stein'];
+export const VORKOMMEN_LISTE = ['baum', 'beere', 'wild', 'schaf', 'gold', 'stein', 'fisch'];
 
 export const KARTEN_GROESSEN = {
-  klein:  { name: 'Klein (2 Spieler)',   kacheln: 96 },
-  mittel: { name: 'Mittel (4 Spieler)',  kacheln: 120 },
-  gross:  { name: 'Gross (6 Spieler)',   kacheln: 144 },
-  riesig: { name: 'Riesig (8 Spieler)',  kacheln: 168 }
+  klein:    { name: 'Klein (2 Spieler)',      kacheln: 96 },
+  mittel:   { name: 'Mittel (4 Spieler)',     kacheln: 120 },
+  gross:    { name: 'Gross (6 Spieler)',      kacheln: 144 },
+  riesig:   { name: 'Riesig (8 Spieler)',     kacheln: 168 },
+  gewaltig: { name: 'Gewaltig (9 Spieler)',   kacheln: 192 }
 };
 
+/* Regler, die vor dem Start eingestellt werden. Die Kartenart setzt
+   sie vor, wer will, dreht sie einzeln. */
+export const WASSER_STUFEN = [
+  { name: 'Kein Wasser',  schwelle: -20000 },
+  { name: 'Wenig',        schwelle: 1000 },
+  { name: 'Normal',       schwelle: 8000 },
+  { name: 'Viel',         schwelle: 16000 }
+];
+export const BERG_STUFEN = [
+  { name: 'Flach',      stufen: 2, rau: 0 },
+  { name: 'Huegelig',   stufen: 4, rau: 0 },
+  { name: 'Bergig',     stufen: 6, rau: 1 },
+  { name: 'Gebirgig',   stufen: 8, rau: 2 }
+];
+export const ROHSTOFF_STUFEN = [
+  { name: 'Karg',   faktor: 60 },
+  { name: 'Normal', faktor: 100 },
+  { name: 'Reich',  faktor: 165 }
+];
+
 export const KARTEN_ARTEN = {
-  ebene:    { name: 'Ebene',        beschreibung: 'Offenes Land, wenig Wald, kaum Wasser. Reiterei hat freie Bahn.' },
-  seen:     { name: 'Seenplatte',   beschreibung: 'Teiche und Buchten zerteilen das Land in Engstellen.' },
-  hochland: { name: 'Hochland',     beschreibung: 'Huegel und Felsriegel. Wer oben steht, sieht weiter.' },
-  waelder:  { name: 'Waelder',      beschreibung: 'Dichter Wald mit Lichtungen. Holz im Ueberfluss, Wege eng.' }
+  ebene:    { name: 'Ebene',      beschreibung: 'Offenes Land, wenig Wald, kaum Wasser. Reiterei hat freie Bahn.',
+              wasser: 0, berge: 1, wald: 26 },
+  seen:     { name: 'Seenplatte', beschreibung: 'Teiche und Buchten zerteilen das Land in Engstellen. Schiffe lohnen sich.',
+              wasser: 2, berge: 1, wald: 34 },
+  hochland: { name: 'Hochland',   beschreibung: 'Huegel und Felsriegel. Wer oben steht, sieht weiter.',
+              wasser: 1, berge: 3, wald: 30 },
+  waelder:  { name: 'Waelder',    beschreibung: 'Dichter Wald mit Lichtungen. Holz im Ueberfluss, Wege eng.',
+              wasser: 1, berge: 1, wald: 70 },
+  kueste:   { name: 'Kueste',     beschreibung: 'Ein grosses Gewaesser teilt die Karte. Ohne Haefen und Bruecken kommt niemand hinueber.',
+              wasser: 3, berge: 1, wald: 30 }
 };
 
 /**
@@ -36,13 +63,20 @@ export const KARTEN_ARTEN = {
 export function erzeugeKarte(o) {
   const groesse = KARTEN_GROESSEN[o.groesse] ? o.groesse : 'mittel';
   const art = KARTEN_ARTEN[o.art] ? o.art : 'ebene';
+  const vorgabe = KARTEN_ARTEN[art];
   const n = KARTEN_GROESSEN[groesse].kacheln;
-  const plaetze = klemme(o.plaetze || 2, 2, 8);
+  const plaetze = klemme(o.plaetze || 2, 2, 9);
   const saat = (o.saat | 0) || 12345;
   const rnd = new Zufall(saat);
 
+  /* Die Regler: was nicht gesetzt ist, kommt aus der Kartenart. */
+  const wasser = klemme(o.wasser == null ? vorgabe.wasser : o.wasser, 0, 3);
+  const berge = klemme(o.berge == null ? vorgabe.berge : o.berge, 0, 3);
+  const rohstoffe = klemme(o.rohstoffe == null ? 1 : o.rohstoffe, 0, 2);
+  const wald = klemme(o.wald == null ? vorgabe.wald : o.wald, 5, 90);
+
   const k = {
-    saat, groesse, art, breite: n, hoehe: n,
+    saat, groesse, art, wasser, berge, rohstoffe, wald, breite: n, hoehe: n,
     hoehen: new Uint8Array(n * n),
     boden: new Uint8Array(n * n),
     vorkommen: new Uint8Array(n * n),
@@ -50,12 +84,19 @@ export function erzeugeKarte(o) {
     start: []
   };
 
-  gelaende(k, rnd, art);
+  gelaende(k, rnd);
+  if (art === 'kueste') meerarm(k, rnd);
+  gewaesserOrdnen(k);
   startplaetze(k, rnd, plaetze);
-  bewaldung(k, rnd, art);
-  erze(k, rnd, art);
-  startvorraete(k, rnd);
+  /* Erst die Landwege sichern, dann die Gewaesser noch einmal ordnen:
+     ein Damm kann einen See zerschneiden, und die Reste waeren fuer
+     Boote wertlos. Fisch kommt danach — er soll erreichbar sein. */
   verbinde(k);
+  gewaesserOrdnen(k);
+  bewaldung(k, rnd);
+  erze(k, rnd);
+  fischgruende(k, rnd);
+  startvorraete(k, rnd);
   return k;
 }
 
@@ -75,18 +116,17 @@ export function begehbar(k, x, y) {
 
 /* ─────────────── Gelaende ─────────────── */
 
-function gelaende(k, rnd, art) {
+function gelaende(k, rnd) {
   const n = k.breite;
   const hoehenfeld = rauschfeld(n, n, rnd.next() | 0, 5, 24);
   const bodenfeld = rauschfeld(n, n, rnd.next() | 0, 4, 12);
 
-  /* Wie stark faellt das Gelaende aus? */
+  /* Wie stark faellt das Gelaende aus? Kommt jetzt aus den Reglern. */
   const profil = {
-    ebene:    { stufen: 3, wasser: -8000, rau: 0 },
-    seen:     { stufen: 3, wasser: 8000,   rau: 0 },
-    hochland: { stufen: 6, wasser: 0,      rau: 1 },
-    waelder:  { stufen: 4, wasser: 1000,   rau: 0 }
-  }[art];
+    stufen: BERG_STUFEN[k.berge].stufen,
+    rau: BERG_STUFEN[k.berge].rau,
+    wasser: WASSER_STUFEN[k.wasser].schwelle
+  };
 
   for (let i = 0; i < n * n; i++) {
     const h = klemme(hoehenfeld[i], 0, 65535);
@@ -109,7 +149,7 @@ function gelaende(k, rnd, art) {
     if (nachbarIst(k, x, y, BODEN.wasser)) k.boden[i] = BODEN.sand;
   }
 
-  /* Felsriegel im Hochland: steile Kanten werden unpassierbar. */
+  /* Felsriegel im Gebirge: steile Kanten werden unpassierbar. */
   if (profil.rau) {
     for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) {
       const i = y * n + x;
@@ -120,7 +160,7 @@ function gelaende(k, rnd, art) {
       if (Math.abs(h - k.hoehen[i + 1]) >= 2) steil++;
       if (Math.abs(h - k.hoehen[i - n]) >= 2) steil++;
       if (Math.abs(h - k.hoehen[i + n]) >= 2) steil++;
-      if (steil >= 2 && h >= 3) k.boden[i] = BODEN.fels;
+      if (steil >= (profil.rau > 1 ? 1 : 2) && h >= 3) k.boden[i] = BODEN.fels;
     }
   }
 
@@ -130,6 +170,93 @@ function gelaende(k, rnd, art) {
       const i = y * n + x;
       if (k.boden[i] === BODEN.wasser) { k.boden[i] = BODEN.sand; k.hoehen[i] = 1; }
     }
+  }
+}
+
+/* ─────────────── Gewaesser ───────────────
+   Reines Rauschen macht viele winzige Pfuetzen. Ein Boot passt da
+   nicht hinein, und ein Fischschwarm mitten in einer Drei-Feld-Lache
+   ist unerreichbar. Darum werden die Gewaesser einmal durchgezaehlt:
+   was zu klein ist, wird Land. Was bleibt, ist befahrbar. */
+
+const MINDESTSEE = 14;
+
+/** Nummeriert alle zusammenhaengenden Wasserflaechen (8er-Nachbarschaft). */
+export function gewaesser(k) {
+  const n = k.breite, m = k.hoehe;
+  const marke = new Int32Array(n * m).fill(-1);
+  const groesse = [];
+  for (let i = 0; i < n * m; i++) {
+    if (marke[i] >= 0 || k.boden[i] !== BODEN.wasser) continue;
+    const nummer = groesse.length;
+    const stapel = [i];
+    marke[i] = nummer;
+    let zahl = 0;
+    while (stapel.length) {
+      const j = stapel.pop(); zahl++;
+      const x = j % n, y = (j / n) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (!drin(k, nx, ny)) continue;
+        const t = ny * n + nx;
+        if (marke[t] >= 0 || k.boden[t] !== BODEN.wasser) continue;
+        marke[t] = nummer; stapel.push(t);
+      }
+    }
+    groesse.push(zahl);
+  }
+  return { marke, groesse };
+}
+
+/** Trocknet Pfuetzen aus und sandet die Ufer neu an. */
+function gewaesserOrdnen(k) {
+  const n = k.breite;
+  const { marke, groesse } = gewaesser(k);
+  for (let i = 0; i < n * k.hoehe; i++) {
+    if (marke[i] < 0) continue;
+    if (groesse[marke[i]] >= MINDESTSEE) continue;
+    k.boden[i] = BODEN.sand;
+    k.hoehen[i] = 1;
+  }
+  /* Ufer neu setzen: was jetzt am Wasser liegt, wird Sand, alter
+     Sand ohne Wasser daneben wird wieder Wiese. */
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const i = y * n + x;
+    if (k.boden[i] === BODEN.wasser) continue;
+    if (nachbarIst(k, x, y, BODEN.wasser)) k.boden[i] = BODEN.sand;
+  }
+}
+
+/* ─────────────── Meerarm ───────────────
+   Auf der Kueste zieht sich ein breiter Arm quer durch die Karte.
+   Er entsteht als Irrfahrt von Rand zu Rand — ohne Winkelfunktionen,
+   damit jeder Rechner dieselbe Kuestenlinie bekommt. */
+
+function meerarm(k, rnd) {
+  const n = k.breite;
+  const quer = rnd.bis(2) === 0;              // waagerecht oder senkrecht
+  const breite = 5 + k.wasser * 2;            // Regler „Wasseranteil“
+  let lauf = (n >> 2) + rnd.bis(n >> 1);      // Startlage in der Mitte
+  for (let s = 0; s < n; s++) {
+    /* Irrfahrt: der Arm maeandert, bleibt aber im mittleren Drittel. */
+    lauf += rnd.bis(3) - 1;
+    if (lauf < n / 4) lauf++;
+    if (lauf > n * 3 / 4) lauf--;
+    const halb = (breite >> 1) + (rnd.bis(3) - 1);
+    for (let d = -halb; d <= halb; d++) {
+      const x = quer ? s : lauf + d;
+      const y = quer ? lauf + d : s;
+      if (!drin(k, x, y)) continue;
+      const i = y * n + x;
+      k.boden[i] = BODEN.wasser;
+      k.hoehen[i] = 0;
+    }
+  }
+  /* Der Kartenrand bleibt trocken. */
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (x >= 2 && y >= 2 && x < n - 2 && y < n - 2) continue;
+    const i = y * n + x;
+    if (k.boden[i] === BODEN.wasser) { k.boden[i] = BODEN.sand; k.hoehen[i] = 1; }
   }
 }
 
@@ -231,9 +358,9 @@ function planiere(k, cx, cy, r) {
 
 /* ─────────────── Waelder ─────────────── */
 
-function bewaldung(k, rnd, art) {
+function bewaldung(k, rnd) {
   const n = k.breite;
-  const dichte = { ebene: 26, seen: 34, hochland: 30, waelder: 70 }[art];
+  const dichte = Math.round(k.wald * ROHSTOFF_STUFEN[k.rohstoffe].faktor / 100);
   const felder = Math.round(n * n * dichte / 10000);
   for (let f = 0; f < felder; f++) {
     const x = rnd.bis(n), y = rnd.bis(n);
@@ -295,20 +422,23 @@ function nahAmStart(k, x, y, r) {
 
 /* ─────────────── Gold und Stein ─────────────── */
 
-function erze(k, rnd, art) {
+function erze(k, rnd) {
   const n = k.breite;
-  const zahl = Math.round(n * n / 900);
+  const faktor = ROHSTOFF_STUFEN[k.rohstoffe].faktor;
+  const zahl = Math.round(n * n * faktor / 90000);
   for (let i = 0; i < zahl; i++) {
-    ader(k, rnd, rnd.bis(n), rnd.bis(n), rnd.chance(60) ? 'gold' : 'stein', rnd.bereich(4, 7));
+    ader(k, rnd, rnd.bis(n), rnd.bis(n), rnd.chance(60) ? 'gold' : 'stein',
+         Math.round(rnd.bereich(4, 7) * faktor / 100));
   }
   /* Jedem Startplatz gehoeren eine Goldader und ein Steinbruch in Reichweite,
      dazu zwei weitere Goldadern etwas weiter draussen. */
+  const m = (x) => Math.max(3, Math.round(x * faktor / 100));
   for (const s of k.start) {
-    legeNah(k, rnd, s, 'gold', 5, 9, 14);
-    legeNah(k, rnd, s, 'stein', 4, 9, 14);
-    legeNah(k, rnd, s, 'gold', 5, 17, 24);
-    legeNah(k, rnd, s, 'gold', 4, 17, 24);
-    legeNah(k, rnd, s, 'stein', 4, 17, 24);
+    legeNah(k, rnd, s, 'gold', m(5), 9, 14);
+    legeNah(k, rnd, s, 'stein', m(4), 9, 14);
+    legeNah(k, rnd, s, 'gold', m(5), 17, 24);
+    legeNah(k, rnd, s, 'gold', m(4), 17, 24);
+    legeNah(k, rnd, s, 'stein', m(4), 17, 24);
   }
 }
 
@@ -340,6 +470,64 @@ function ader(k, rnd, cx, cy, art, menge) {
     for (const [dx, dy] of richtungen) offen.push([x + dx, y + dy]);
   }
   return gesetzt > 0;
+}
+
+/* ─────────────── Fischgruende ───────────────
+   Fisch liegt im Wasser und ist nur mit Booten zu holen. Schwaerme
+   sammeln sich in Ufernaehe — dort, wo ein Hafen auch stehen kann. */
+
+function fischgruende(k, rnd) {
+  const n = k.breite;
+  const { marke, groesse } = gewaesser(k);
+  const faktor = ROHSTOFF_STUFEN[k.rohstoffe].faktor;
+
+  /* Je Gewaesser eine eigene Liste freier Felder — so bekommt jeder
+     See seinen Anteil und kein Schwarm landet in einer Lache, in die
+     kein Boot hineinfaehrt. Reihenfolge = Gewaessernummer, also auf
+     jedem Rechner gleich. */
+  const felder = groesse.map(() => []);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const i = y * n + x;
+    if (marke[i] < 0 || k.vorkommen[i]) continue;
+    if (groesse[marke[i]] < 20) continue;
+    /* In Ufernaehe: hoechstens drei Felder bis zum Land, damit die
+       Boote nicht quer ueber die See muessen. */
+    let ufer = false;
+    for (let dy = -3; dy <= 3 && !ufer; dy++) for (let dx = -3; dx <= 3; dx++) {
+      if (!drin(k, x + dx, y + dy)) continue;
+      if (k.boden[(y + dy) * n + x + dx] !== BODEN.wasser) { ufer = true; break; }
+    }
+    if (ufer) felder[marke[i]].push(i);
+  }
+
+  for (let g = 0; g < groesse.length; g++) {
+    if (groesse[g] < 20 || !felder[g].length) continue;
+    /* Ein Schwarm je 45 Wasserfelder, mindestens einer je See. */
+    const schwaerme = Math.max(1, Math.round(groesse[g] * faktor / 4500));
+    for (let s = 0; s < schwaerme; s++) {
+      const liste = felder[g].filter(i => !k.vorkommen[i]);
+      if (!liste.length) break;
+      const i = liste[rnd.bis(liste.length)];
+      schwarmSetzen(k, rnd, i % n, (i / n) | 0);
+    }
+  }
+}
+
+/** Vier bis acht zusammenhaengende Fischfelder ab einem Startfeld. */
+function schwarmSetzen(k, rnd, x, y) {
+  const n = k.breite;
+  const menge = rnd.bereich(4, 8);
+  const offen = [[x, y]];
+  let gesetzt = 0, wache = menge * 8;
+  while (offen.length && gesetzt < menge && wache-- > 0) {
+    const [fx, fy] = offen.shift();
+    if (!drin(k, fx, fy)) continue;
+    const j = fy * n + fx;
+    if (k.boden[j] !== BODEN.wasser || k.vorkommen[j]) continue;
+    setzeVorkommen(k, fx, fy, 'fisch');
+    gesetzt++;
+    for (const [dx, dy] of rnd.mische([[1, 0], [-1, 0], [0, 1], [0, -1]])) offen.push([fx + dx, fy + dy]);
+  }
 }
 
 /* ─────────────── Vorraete am Startplatz ───────────────

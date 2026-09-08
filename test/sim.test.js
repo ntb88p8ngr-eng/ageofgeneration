@@ -432,3 +432,252 @@ test('Nach dem Bauen kehren Dorfbewohner an ihre Quelle zurueck', () => {
   const wiederAmHolz = dorf.filter(e => !e.tot && e.befehl && (e.befehl.art === 'sammeln' || e.befehl.art === 'ackern')).length;
   assert.ok(wiederAmHolz >= 1, 'niemand ist an die Arbeit zurueckgekehrt');
 });
+
+/* ─────────────── Wasser: Karte, Schiffe, Bruecken ─────────────── */
+
+/** Karte mit einem brauchbaren Gewaesser und ein Spieler mit vollen Kassen. */
+function wasserSim(saat) {
+  const sim = new Sim({
+    saat: saat || 4242,
+    karte: { groesse: 'klein', art: 'kueste', wasser: 2 },
+    spieler: [
+      { name: 'A', volk: 'franken', team: 0, farbe: 0, ki: null },
+      { name: 'B', volk: 'briten', team: 1, farbe: 1, ki: null }
+    ]
+  });
+  const p = sim.spieler[0];
+  p.erkundet.fill(1);
+  for (const r of ['nahrung', 'holz', 'gold', 'stein']) p.rohstoffe[r] = 3000;
+  return sim;
+}
+
+test('Kueste bekommt ein grosses zusammenhaengendes Gewaesser', () => {
+  for (const saat of [4242, 777, 31337]) {
+    const sim = wasserSim(saat);
+    const k = sim.karte;
+    const groessen = {};
+    for (let i = 0; i < k.breite * k.hoehe; i++) {
+      const r = sim.wasserRevier[i];
+      if (sim.revierAlt) sim.revierAufbauen();
+      if (r >= 0) groessen[r] = (groessen[r] || 0) + 1;
+    }
+    const groesstes = Math.max(0, ...Object.values(groessen));
+    assert.ok(groesstes >= 300, 'Gewaesser zu klein bei Saat ' + saat + ': ' + groesstes);
+  }
+});
+
+test('Fischgruende liegen nur in befahrbarem Wasser', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  let fisch = 0, inLachen = 0;
+  const zahl = {};
+  for (let i = 0; i < k.breite * k.hoehe; i++) {
+    const r = sim.revier(i % k.breite, (i / k.breite) | 0);
+    if (r >= 0) zahl[r] = (zahl[r] || 0) + 1;
+  }
+  for (let i = 0; i < k.breite * k.hoehe; i++) {
+    if (k.vorkommen[i] !== 7) continue;
+    fisch++;
+    const r = sim.wasserRevier[i];
+    if (r < 0 || zahl[r] < 20) inLachen++;
+  }
+  assert.ok(fisch > 20, 'zu wenig Fisch: ' + fisch);
+  assert.equal(inLachen, 0, 'Fisch in einer Lache: ' + inLachen);
+});
+
+test('Reviere folgen derselben Regel wie die Wegsuche', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  /* Zwei Felder im selben Revier muessen auch per A* verbunden sein. */
+  const felder = [];
+  for (let i = 0; i < k.breite * k.hoehe; i++) {
+    if (sim.revier(i % k.breite, (i / k.breite) | 0) === sim.wasserRevier[i] && sim.wasserRevier[i] >= 0) felder.push(i);
+  }
+  const nachRevier = new Map();
+  for (const i of felder) {
+    const r = sim.wasserRevier[i];
+    if (!nachRevier.has(r)) nachRevier.set(r, []);
+    nachRevier.get(r).push(i);
+  }
+  let geprueft = 0;
+  for (const [, liste] of nachRevier) {
+    if (liste.length < 30) continue;
+    const a = liste[0], b = liste[liste.length - 1];
+    const weg = sim.pfadfinder.suche(sim.sperreWasser, a % k.breite, (a / k.breite) | 0,
+      b % k.breite, (b / k.breite) | 0, { maxKnoten: 40000, naheGenug: 0, zielSperreEgal: true });
+    assert.ok(weg && weg.length, 'kein Wasserweg im selben Revier');
+    geprueft++;
+  }
+  assert.ok(geprueft > 0, 'kein Revier zum Pruefen gefunden');
+});
+
+/** Hafenplatz, in dessen Gewaesser auch Fisch schwimmt. */
+function hafenMitFisch(sim) {
+  const k = sim.karte, p = sim.spieler[0];
+  /* Welche Reviere fuehren Fisch? */
+  const mitFisch = new Set();
+  for (let i = 0; i < k.breite * k.hoehe; i++) {
+    if (k.vorkommen[i] !== 7 || k.menge[i] <= 0) continue;
+    const r = sim.revier(i % k.breite, (i / k.breite) | 0);
+    if (r >= 0) mitFisch.add(r);
+  }
+  let platz = null, bd = Infinity;
+  for (let y = 2; y < k.hoehe - 4; y++) for (let x = 2; x < k.breite - 4; x++) {
+    const d = (x - p.startX) ** 2 + (y - p.startY) ** 2;
+    if (d >= bd) continue;
+    if (!sim.bauplatzFrei(0, 'hafen', x, y)) continue;
+    let passt = false;
+    for (let dy = -1; dy <= 3 && !passt; dy++) for (let dx = -1; dx <= 3; dx++) {
+      if (mitFisch.has(sim.revier(x + dx, y + dy))) { passt = true; break; }
+    }
+    if (!passt) continue;
+    bd = d; platz = [x, y];
+  }
+  return platz;
+}
+
+test('Hafen baut Boote aufs Wasser, Fischerboot faengt und liefert ab', () => {
+  const sim = wasserSim();
+  const k = sim.karte, p = sim.spieler[0];
+  const platz = hafenMitFisch(sim);
+  assert.ok(platz, 'kein Hafenplatz am Fischgrund gefunden');
+  const hafen = sim.gebaeudeSetzen(0, 'hafen', platz[0], platz[1], true);
+  sim.befehlAusfuehren({ s: 0, a: 'ausbilden', g: hafen.id, typ: 'fischerboot' });
+  for (let t = 0; t < 1200; t++) sim.takten();
+  const boot = sim.einheiten.find(e => !e.tot && e.typ === 'fischerboot');
+  assert.ok(boot, 'kein Fischerboot gebaut');
+  assert.equal(k.boden[sim.ky(boot) * k.breite + sim.kx(boot)], 4, 'Boot steht nicht im Wasser');
+
+  let fisch = null, fd = Infinity;
+  for (let i = 0; i < k.breite * k.hoehe; i++) {
+    if (k.vorkommen[i] !== 7 || k.menge[i] <= 0) continue;
+    const x = i % k.breite, y = (i / k.breite) | 0;
+    const d = (x - sim.kx(boot)) ** 2 + (y - sim.ky(boot)) ** 2;
+    if (d < fd && sim.wasserErreichbar(boot, x, y)) { fd = d; fisch = [x, y]; }
+  }
+  assert.ok(fisch, 'kein erreichbarer Fischgrund');
+  const vorher = p.rohstoffe.nahrung;
+  sim.befehlAusfuehren({ s: 0, a: 'sammeln', ids: [boot.id], kx: fisch[0], ky: fisch[1] });
+  for (let t = 0; t < 3000; t++) sim.takten();
+  assert.ok(p.rohstoffe.nahrung > vorher, 'Fischerboot hat nichts abgeliefert');
+});
+
+test('Transporter nimmt Landvolk auf und setzt es wieder ab', () => {
+  const sim = wasserSim();
+  const k = sim.karte, p = sim.spieler[0];
+  let platz = null, bd = Infinity;
+  for (let y = 2; y < k.hoehe - 4; y++) for (let x = 2; x < k.breite - 4; x++) {
+    if (!sim.bauplatzFrei(0, 'hafen', x, y)) continue;
+    const d = (x - p.startX) ** 2 + (y - p.startY) ** 2;
+    if (d < bd) { bd = d; platz = [x, y]; }
+  }
+  const hafen = sim.gebaeudeSetzen(0, 'hafen', platz[0], platz[1], true);
+  sim.befehlAusfuehren({ s: 0, a: 'ausbilden', g: hafen.id, typ: 'transporter' });
+  for (let t = 0; t < 1500; t++) sim.takten();
+  const schiff = sim.einheiten.find(e => !e.tot && e.typ === 'transporter');
+  assert.ok(schiff, 'kein Transporter gebaut');
+
+  const dorf = sim.einheiten.filter(e => !e.tot && e.spieler === 0 && e.typ === 'dorfbewohner').slice(0, 2);
+  sim.befehlAusfuehren({ s: 0, a: 'einsteigen', ziel: schiff.id, ids: dorf.map(e => e.id) });
+  for (let t = 0; t < 1500; t++) sim.takten();
+  assert.equal(schiff.fracht.length, 2, 'nicht alle an Bord');
+  assert.ok(dorf.every(e => e.verladen === schiff.id), 'Passagier nicht als verladen vermerkt');
+
+  /* Ein Landfeld am eigenen Gewaesser als Anlandeziel. */
+  let ziel = null, zd = -1;
+  for (let y = 2; y < k.hoehe - 2; y++) for (let x = 2; x < k.breite - 2; x++) {
+    const i = y * k.breite + x;
+    if (k.boden[i] === 4 || sim.sperre[i] !== 0) continue;
+    let amWasser = false;
+    for (let dy = -1; dy <= 1 && !amWasser; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (sim.revier(x + dx, y + dy) === sim.revierVon(schiff)) { amWasser = true; break; }
+    }
+    if (!amWasser) continue;
+    const d = (x - sim.kx(schiff)) ** 2 + (y - sim.ky(schiff)) ** 2;
+    if (d > zd) { zd = d; ziel = [x, y]; }
+  }
+  assert.ok(ziel, 'kein Anlandeziel gefunden');
+  sim.befehlAusfuehren({ s: 0, a: 'ausladen', ids: [schiff.id],
+    x: ziel[0] * FP + FP / 2, y: ziel[1] * FP + FP / 2 });
+  for (let t = 0; t < 4000; t++) sim.takten();
+  assert.equal(schiff.fracht.length, 0, 'Fracht nicht abgesetzt');
+  assert.ok(dorf.every(e => !e.verladen && !e.tot), 'Passagier nicht wieder an Land');
+});
+
+test('Bruecken liegen auf dem Wasser und sind begehbar', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  let platz = null;
+  for (let y = 2; y < k.hoehe - 2 && !platz; y++) for (let x = 2; x < k.breite - 2; x++) {
+    if (sim.bauplatzFrei(0, 'bruecke', x, y)) { platz = [x, y]; break; }
+  }
+  assert.ok(platz, 'kein Brueckenplatz gefunden');
+  const i = platz[1] * k.breite + platz[0];
+  assert.equal(k.boden[i], 4, 'Bruecke nicht auf Wasser');
+  assert.equal(sim.sperre[i], GESPERRT, 'Wasser war schon begehbar');
+  sim.gebaeudeSetzen(0, 'bruecke', platz[0], platz[1], true);
+  assert.equal(sim.sperre[i], 0, 'Bruecke nicht begehbar');
+  assert.equal(sim.sperreWasser[i], GESPERRT, 'Schiffe fahren durch die Bruecke');
+});
+
+test('Bauen ebnet den Grund ein', () => {
+  const sim = new Sim({
+    saat: 99, karte: { groesse: 'klein', art: 'hochland', berge: 3 },
+    spieler: [{ name: 'A', volk: 'franken', team: 0, farbe: 0, ki: null },
+              { name: 'B', volk: 'briten', team: 1, farbe: 1, ki: null }]
+  });
+  const k = sim.karte;
+  sim.spieler[0].erkundet.fill(1);
+  let stelle = null, spanne = -1;
+  for (let y = 3; y < k.hoehe - 5; y++) for (let x = 3; x < k.breite - 5; x++) {
+    if (!sim.bauplatzFrei(0, 'farm', x, y)) continue;
+    let min = 99, max = -1;
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+      const h = k.hoehen[(y + dy) * k.breite + x + dx];
+      if (h < min) min = h;
+      if (h > max) max = h;
+    }
+    if (max - min > spanne) { spanne = max - min; stelle = [x, y]; }
+  }
+  assert.ok(spanne > 0, 'kein welliger Bauplatz gefunden');
+  const vor = sim.gelaendeVersion;
+  sim.gebaeudeSetzen(0, 'farm', stelle[0], stelle[1], true);
+  assert.ok(sim.gelaendeVersion > vor, 'Gelaendeversion nicht erhoeht');
+  let min = 99, max = -1;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) {
+    const h = k.hoehen[(stelle[1] + dy) * k.breite + stelle[0] + dx];
+    if (h < min) min = h;
+    if (h > max) max = h;
+  }
+  assert.equal(max, min, 'Grund unter dem Gebaeude ist nicht eben');
+});
+
+test('Kartenregler wirken auf Wasser, Berge und Rohstoffe', () => {
+  const zaehle = (k, art) => {
+    let n = 0;
+    for (let i = 0; i < k.breite * k.hoehe; i++) if (k.boden[i] === art) n++;
+    return n;
+  };
+  const trocken = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'seen', plaetze: 2, wasser: 0 });
+  const nass = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'seen', plaetze: 2, wasser: 3 });
+  assert.equal(zaehle(trocken, 4), 0, 'ohne Wasser darf kein Wasser da sein');
+  assert.ok(zaehle(nass, 4) > 400, 'zu wenig Wasser bei „Viel“: ' + zaehle(nass, 4));
+
+  const karg = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'ebene', plaetze: 2, rohstoffe: 0 });
+  const reich = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'ebene', plaetze: 2, rohstoffe: 2 });
+  const gold = (k) => { let n = 0; for (let i = 0; i < k.vorkommen.length; i++) if (k.vorkommen[i] === 5) n++; return n; };
+  assert.ok(gold(reich) > gold(karg), 'reich hat nicht mehr Gold als karg');
+
+  const flach = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'ebene', plaetze: 2, berge: 0 });
+  const gebirge = erzeugeKarte({ saat: 5, groesse: 'klein', art: 'ebene', plaetze: 2, berge: 3 });
+  assert.ok(Math.max(...gebirge.hoehen) > Math.max(...flach.hoehen), 'Gebirge nicht hoeher als Flachland');
+});
+
+test('Neun Spieler bekommen erreichbare Startplaetze', () => {
+  const k = erzeugeKarte({ saat: 2026, groesse: 'gewaltig', art: 'kueste', plaetze: 9 });
+  assert.equal(k.start.length, 9);
+  const da = flut(k, k.start[0].x, k.start[0].y);
+  for (let i = 1; i < 9; i++) {
+    assert.ok(da[k.start[i].y * k.breite + k.start[i].x], 'Startplatz ' + i + ' nicht erreichbar');
+  }
+});

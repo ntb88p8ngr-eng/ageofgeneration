@@ -167,6 +167,39 @@ export class Welt {
     this.szene.add(this.gelaende);
   }
 
+  /**
+   * Uebernimmt geaenderte Gelaendehoehen ins Netz: erst die Eckhoehen,
+   * dann die Punkte des feinen Gitters, dann die Normalen.
+   */
+  gelaendeNachziehen() {
+    const k = this.sim.karte;
+    const b = k.breite, h = k.hoehe;
+    for (let y = 0; y <= h; y++) {
+      for (let x = 0; x <= b; x++) {
+        let summe = 0, n = 0;
+        for (const [dx, dy] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+          const tx = x + dx, ty = y + dy;
+          if (tx < 0 || ty < 0 || tx >= b || ty >= h) continue;
+          const i = ty * b + tx;
+          summe += k.boden[i] === BODEN.wasser ? -0.6 : k.hoehen[i];
+          n++;
+        }
+        this.ecken[y * (b + 1) + x] = n ? (summe / n) * HOEHE : 0;
+      }
+    }
+    const S = UNTERTEILUNG;
+    const gb = this.gitterB, gh = this.gitterH;
+    const pos = this.gelaendeGeo.attributes.position;
+    const arr = pos.array;
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gb; i++) {
+        arr[(j * gb + i) * 3 + 1] = this.eckHoehe(i / S, j / S);
+      }
+    }
+    pos.needsUpdate = true;
+    this.gelaendeGeo.computeVertexNormals();
+  }
+
   /** Hoehe an einem Punkt des Eckgitters (bilinear zwischen Kachelecken). */
   eckHoehe(x, z) {
     const k = this.sim.karte, b = k.breite;
@@ -402,6 +435,14 @@ export class Welt {
     const sim = this.sim;
     const t = Math.max(0, Math.min(1, zwischen));
 
+    /* Wurde beim Bauen planiert, zieht das Gelaendenetz nach. Das
+       passiert selten — nur wenn wirklich ein Bauwerk gesetzt wurde —
+       deshalb darf es ruhig das ganze Netz neu berechnen. */
+    if (this.gelaendeStand !== sim.gelaendeVersion) {
+      this.gelaendeStand = sim.gelaendeVersion;
+      this.gelaendeNachziehen();
+      this.landDreckig = true;
+    }
     if (this.landDreckig) { this.landschaftBauen(); this.landDreckig = false; }
     if (this.nebelDreckig) { this.nebelZeichnen(); this.nebelDreckig = false; }
 
@@ -424,8 +465,11 @@ export class Welt {
       const mitte = b.groesse / 2;
       const x = b.kx + mitte, z = b.ky + mitte;
       const fortschritt = b.fertig ? 1 : Math.max(0.12, b.bauFortschritt / b.bauGesamt);
+      /* Was auf dem Wasser steht, sitzt auf dem Wasserspiegel — nicht
+         auf dem Grund darunter. */
+      const yBau = GEBAEUDE[b.typ].aufWasser ? WASSER_Y - 0.02 : this.hoeheAn(x, z);
       nimm('b:' + b.typ + ':' + p.volk, gebaeudeModell(b.typ, p.volk), {
-        x, y: this.hoeheAn(x, z), z, winkel: 0, skalaY: fortschritt,
+        x, y: yBau, z, winkel: (b.drehung || 0) * Math.PI / 2, skalaY: fortschritt,
         farbe: FARBEN[p.farbe % FARBEN.length].hex,
         matt: !b.fertig
       });
@@ -433,7 +477,7 @@ export class Welt {
 
     /* ── Einheiten ── */
     for (const e of sim.einheiten) {
-      if (e.tot || !this.darfSehen(e)) continue;
+      if (e.tot || e.verladen || !this.darfSehen(e)) continue;
       const p = sim.spieler[e.spieler];
       const x = (e.altX + (e.x - e.altX) * t) / FP;
       const z = (e.altY + (e.y - e.altY) * t) / FP;
@@ -448,9 +492,11 @@ export class Welt {
         while (d < -Math.PI) d += Math.PI * 2;
         merk.winkel += d * Math.min(1, 0.35);
       }
+      const schiff = !!(EINHEITEN[e.typ] && EINHEITEN[e.typ].wasser);
       nimm('e:' + e.typ, einheitModell(e.typ), {
-        x, y: this.hoeheAn(x, z), z, winkel: merk.winkel - Math.PI / 2, skalaY: 1,
-        skala: EINHEIT_SKALA, farbe: FARBEN[p.farbe % FARBEN.length].hex
+        x, y: schiff ? WASSER_Y - 0.04 : this.hoeheAn(x, z), z,
+        winkel: merk.winkel - Math.PI / 2, skalaY: 1,
+        skala: schiff ? 1.15 : EINHEIT_SKALA, farbe: FARBEN[p.farbe % FARBEN.length].hex
       });
     }
 
@@ -532,7 +578,8 @@ export class Welt {
         if (!liste) { liste = []; listen.set(art, liste); }
         const streuX = (((x * 374761393 + y * 668265263) >>> 8) & 255) / 255 - 0.5;
         const streuZ = (((x * 668265263 + y * 374761393) >>> 8) & 255) / 255 - 0.5;
-        liste.push({ x: x + 0.5 + streuX * 0.4, z: y + 0.5 + streuZ * 0.4, dreh: ((x * 31 + y * 17) % 16) / 16 * 6.283 });
+        liste.push({ x: x + 0.5 + streuX * 0.4, z: y + 0.5 + streuZ * 0.4,
+                     dreh: ((x * 31 + y * 17) % 16) / 16 * 6.283, wasser: art === 'fisch' });
       }
     }
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v3 = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
@@ -551,7 +598,7 @@ export class Welt {
       for (let i = 0; i < liste.length; i++) {
         const o = liste[i];
         q.setFromAxisAngle(achse, o.dreh);
-        v3.set(o.x, this.hoeheAn(o.x, o.z), o.z);
+        v3.set(o.x, o.wasser ? WASSER_Y - 0.02 : this.hoeheAn(o.x, o.z), o.z);
         m.compose(v3, q, s);
         if (gr.koerper) gr.koerper.setMatrixAt(i, m);
         if (gr.neutral) gr.neutral.setMatrixAt(i, m);
@@ -722,7 +769,7 @@ export class Welt {
       n++;
     };
     for (const e of sim.einheiten) {
-      if (e.tot || !this.darfSehen(e)) continue;
+      if (e.tot || e.verladen || !this.darfSehen(e)) continue;
       const x = (e.altX + (e.x - e.altX) * t) / FP;
       const z = (e.altY + (e.y - e.altY) * t) / FP;
       eintrag(e, x, z, 0.95, 0.7);
@@ -764,7 +811,9 @@ export class Welt {
     }
     const g = GEBAEUDE[typ].groesse;
     const x = kx + g / 2, z = ky + g / 2;
-    this.vorschau.position.set(x, this.hoeheAn(x, z), z);
+    /* Bruecken schwimmen auf dem Wasser, alles Uebrige steht im Gelaende. */
+    const y = GEBAEUDE[typ].aufWasser ? WASSER_Y - 0.02 : this.hoeheAn(x, z);
+    this.vorschau.position.set(x, y, z);
     this.vorschau.visible = true;
   }
 
@@ -825,7 +874,7 @@ export class Welt {
     let bestes = null, bestD = 42 * 42;
     const v = new THREE.Vector3();
     for (const e of sim.einheiten) {
-      if (e.tot || !this.darfSehen(e)) continue;
+      if (e.tot || e.verladen || !this.darfSehen(e)) continue;
       if (nurEigene && e.spieler !== this.spielerId) continue;
       const x = e.x / FP, z = e.y / FP;
       this.aufSchirm(x, this.hoeheAn(x, z) + 0.35, z, v);
@@ -854,7 +903,7 @@ export class Welt {
     const ax = Math.min(x0, x1), bx = Math.max(x0, x1);
     const ay = Math.min(y0, y1), by = Math.max(y0, y1);
     for (const e of this.sim.einheiten) {
-      if (e.tot || e.spieler !== this.spielerId) continue;
+      if (e.tot || e.verladen || e.spieler !== this.spielerId) continue;
       const x = e.x / FP, z = e.y / FP;
       this.aufSchirm(x, this.hoeheAn(x, z) + 0.3, z, v);
       if (v.z > 1) continue;

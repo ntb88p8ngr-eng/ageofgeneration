@@ -59,6 +59,7 @@ export const KI = {
       case 4: militaer(sim, p, z); break;
       case 5: spaehen(sim, p, z); break;
     }
+    if (z.zaehler % 12 === 7) fischerei(sim, p, z);
   }
 };
 
@@ -350,7 +351,23 @@ function bauen(sim, p, z) {
   if (zahlGebaeude(sim, p, 'lager', true) < 2 + p.zeitalter && p.rohstoffe.holz >= 100) {
     if (bauAuftrag(sim, p, 'lager', dorf.slice(0, 2))) { z.letzterBau = sim.takt; return; }
   }
-  /* 3. Farmen, sobald die Muehle steht und Nahrung knapp wird. */
+  /* 3. Ein Hafen, wenn Wasser mit Fisch vor der Haustuer liegt. Fisch
+     ist Nahrung, die niemand saet und niemand bewachen muss. Findet
+     sich kein Platz, wird eine Weile nicht wieder gesucht — die Suche
+     laeuft ueber die halbe Karte. */
+  if (zahlGebaeude(sim, p, 'hafen', true) < 1
+      && zahlGebaeude(sim, p, 'muehle', false) > 0
+      && p.rohstoffe.holz >= 150 && sim.takt > (z.hafenPause || 0)) {
+    const platz = hafenplatz(sim, p);
+    if (platz) {
+      befehl(sim, p, { a: 'bauen', ids: dorf.slice(0, 2).map(e => e.id), typ: 'hafen',
+                       kx: platz[0], ky: platz[1] });
+      z.letzterBau = sim.takt;
+      return;
+    }
+    z.hafenPause = sim.takt + 1200;
+  }
+  /* 4. Farmen, sobald die Muehle steht und Nahrung knapp wird. */
   const farmen = zahlGebaeude(sim, p, 'farm', true);
   let farmZiel = [4, 9, 13, 15][p.zeitalter];
   /* Wenn die Nahrung ausgeht, wird gepflanzt statt gespart. */
@@ -358,7 +375,7 @@ function bauen(sim, p, z) {
   if (zahlGebaeude(sim, p, 'muehle', false) > 0 && farmen < farmZiel && p.rohstoffe.holz >= 120) {
     if (bauAuftrag(sim, p, 'farm', dorf.slice(0, 1))) { z.letzterBau = sim.takt; return; }
   }
-  /* 4. Militaergebaeude nach Zeitalter. */
+  /* 5. Militaergebaeude nach Zeitalter. */
   const plan = [
     ['kaserne'],
     ['kaserne', 'schuetzenstand', 'stall'],
@@ -374,7 +391,7 @@ function bauen(sim, p, z) {
     if (!sim.kannZahlen(p.id, kostenVon('gebaeude', typ, p.volk))) continue;
     if (bauAuftrag(sim, p, typ, dorf.slice(0, 2))) { z.letzterBau = sim.takt; return; }
   }
-  /* 5. Ein Turm zur Absicherung, wenn Stein da ist. */
+  /* 6. Ein Turm zur Absicherung, wenn Stein da ist. */
   if (p.zeitalter >= 1 && p.rohstoffe.stein > 300 && zahlGebaeude(sim, p, 'turm', true) < 2) {
     if (bauAuftrag(sim, p, 'turm', dorf.slice(0, 1))) { z.letzterBau = sim.takt; return; }
   }
@@ -422,6 +439,48 @@ function platzSuchen(sim, p, typ, cx, cy) {
     }
   }
   return null;
+}
+
+/** Bauplatz fuer den Hafen: am Wasser, in Reichweite des Zentrums
+    und nur dort, wo es auch etwas zu fischen gibt. */
+function hafenplatz(sim, p) {
+  const k = sim.karte;
+  const tc = hauptzentrum(sim, p);
+  if (!tc) return null;
+  const cx = tc.kx, cy = tc.ky;
+  let bestes = null, bestD = Infinity;
+  for (let y = Math.max(0, cy - 24); y < Math.min(k.hoehe, cy + 24); y++) {
+    for (let x = Math.max(0, cx - 24); x < Math.min(k.breite, cx + 24); x++) {
+      const d = kachelAbstand(x, y, cx, cy);
+      if (d >= bestD) continue;
+      if (!p.erkundet[y * k.breite + x]) continue;
+      if (!sim.bauplatzFrei(p.id, 'hafen', x, y)) continue;
+      if (!fischInDerNaehe(sim, x, y)) continue;
+      bestD = d; bestes = [x, y];
+    }
+  }
+  return bestes;
+}
+
+/** Liegt im selben Gewaesser ein Fischgrund? */
+function fischInDerNaehe(sim, kx, ky) {
+  const k = sim.karte;
+  /* Erst das Wasser vor dem Hafen finden, dann dessen Revier. */
+  let revier = -1;
+  for (let dy = -1; dy <= 3 && revier < 0; dy++) for (let dx = -1; dx <= 3; dx++) {
+    const r = sim.revier(kx + dx, ky + dy);
+    if (r >= 0) { revier = r; break; }
+  }
+  if (revier < 0) return false;
+  const fischNr = VORKOMMEN_LISTE.indexOf('fisch') + 1;
+  for (let y = Math.max(0, ky - 30); y < Math.min(k.hoehe, ky + 30); y++) {
+    for (let x = Math.max(0, kx - 30); x < Math.min(k.breite, kx + 30); x++) {
+      const i = y * k.breite + x;
+      if (k.vorkommen[i] !== fischNr || k.menge[i] <= 0) continue;
+      if (sim.wasserRevier[i] === revier) return true;
+    }
+  }
+  return false;
 }
 
 /** Quelle, die weit vom naechsten Lager weg ist — dort lohnt ein neues. */
@@ -501,6 +560,39 @@ function ausbilden(sim, p, z) {
       befehl(sim, p, { a: 'ausbilden', g: b.id, typ, anzahl: 1 });
       break;
     }
+  }
+}
+
+/* ─────────────── Fischerei ───────────────
+   Der Hafen zahlt sich nur mit Booten aus. Ein leerlaufendes Boot
+   bekommt den naechsten Fischgrund im eigenen Gewaesser zugewiesen. */
+
+function fischerei(sim, p, z) {
+  const haefen = meineGebaeude(sim, p, 'hafen').filter(b => b.fertig);
+  if (!haefen.length) return;
+  const boote = meineEinheiten(sim, p, e => e.typ === 'fischerboot');
+  const raum = Math.min(p.bevRaum, p.bevGrenze);
+
+  if (boote.length < 5 && p.bev < raum
+      && sim.kannZahlen(p.id, kostenVon('einheit', 'fischerboot', p.volk))) {
+    const hafen = haefen.find(b => b.warteschlange.length < 2);
+    if (hafen) befehl(sim, p, { a: 'ausbilden', g: hafen.id, typ: 'fischerboot', anzahl: 1 });
+  }
+
+  const fischNr = VORKOMMEN_LISTE.indexOf('fisch') + 1;
+  const k = sim.karte;
+  for (const boot of boote) {
+    if (boot.zustand !== 0) continue;          // nur was untaetig herumliegt
+    let bestes = null, bestD = Infinity;
+    for (let i = 0; i < k.vorkommen.length; i++) {
+      if (k.vorkommen[i] !== fischNr || k.menge[i] <= 0) continue;
+      const x = i % k.breite, y = (i / k.breite) | 0;
+      const d = kachelAbstand(x, y, sim.kx(boot), sim.ky(boot));
+      if (d >= bestD) continue;
+      if (!sim.wasserErreichbar(boot, x, y)) continue;
+      bestD = d; bestes = [x, y];
+    }
+    if (bestes) befehl(sim, p, { a: 'sammeln', ids: [boot.id], kx: bestes[0], ky: bestes[1] });
   }
 }
 

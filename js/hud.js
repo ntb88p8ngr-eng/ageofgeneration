@@ -381,7 +381,7 @@ export class Hud {
       c.fillRect(b.kx * sx, b.ky * sy, Math.max(2, b.groesse * sx), Math.max(2, b.groesse * sy));
     }
     for (const e of sim.einheiten) {
-      if (e.tot) continue;
+      if (e.tot || e.verladen) continue;
       const kx = (e.x / FP) | 0, ky = (e.y / FP) | 0;
       if (pid != null && sim.sichtbarFuer(pid, kx, ky) !== 2) continue;
       c.fillStyle = '#' + FARBEN[sim.spieler[e.spieler].farbe % FARBEN.length].hex.toString(16).padStart(6, '0');

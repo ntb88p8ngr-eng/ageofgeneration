@@ -97,14 +97,17 @@ export class Partien {
   erstellen(s, o) {
     if (s.partie) this.verlassen(s);
     const id = crypto.randomBytes(6).toString('hex');
-    const anzahl = Math.max(2, Math.min(8, Number(o.plaetze) || 4));
+    const anzahl = Math.max(2, Math.min(9, Number(o.plaetze) || 4));
     const p = {
       id,
       name: String(o.name || (s.name + 's Partie')).slice(0, 40),
       wirt: s.token,
       karte: {
-        art: erlaubt(o.karte && o.karte.art, ['ebene', 'seen', 'hochland', 'waelder'], 'ebene'),
-        groesse: erlaubt(o.karte && o.karte.groesse, ['klein', 'mittel', 'gross', 'riesig'], 'mittel')
+        art: erlaubt(o.karte && o.karte.art, ['ebene', 'seen', 'hochland', 'waelder', 'kueste'], 'ebene'),
+        groesse: erlaubt(o.karte && o.karte.groesse, ['klein', 'mittel', 'gross', 'riesig', 'gewaltig'], 'mittel'),
+        wasser: erlaubt(Number(o.karte && o.karte.wasser), [0, 1, 2, 3], 0),
+        berge: erlaubt(Number(o.karte && o.karte.berge), [0, 1, 2, 3], 1),
+        rohstoffe: erlaubt(Number(o.karte && o.karte.rohstoffe), [0, 1, 2], 1)
       },
       bevGrenze: erlaubt(Number(o.bevGrenze), [50, 100, 200], 100),
       startgut: erlaubt(o.startgut, ['normal', 'reich'], 'normal'),
@@ -174,7 +177,7 @@ export class Partien {
     const meiner = pl.token === s.token;
     if (!meiner && !binWirt) return;
     if (feld === 'volk') pl.volk = erlaubt(wert.wert, ['franken', 'briten', 'byzantiner', 'mongolen'], pl.volk);
-    else if (feld === 'team') pl.team = Math.max(1, Math.min(4, Number(wert.wert) || 1));
+    else if (feld === 'team') pl.team = Math.max(1, Math.min(p.plaetze.length, Number(wert.wert) || 1));
     else if (feld === 'art' && binWirt && !meiner) {
       const w = String(wert.wert || '');
       if (w === 'zu') { pl.zu = true; pl.ki = null; this.werfen(p, pl); }
@@ -194,8 +197,16 @@ export class Partien {
   einstellung(s, feld, wert) {
     const p = this.meine(s);
     if (!p || p.gestartet || p.wirt !== s.token) return;
-    if (feld === 'kartenart') p.karte.art = erlaubt(wert, ['ebene', 'seen', 'hochland', 'waelder'], p.karte.art);
-    if (feld === 'kartengroesse') p.karte.groesse = erlaubt(wert, ['klein', 'mittel', 'gross', 'riesig'], p.karte.groesse);
+    if (feld === 'kartenart') {
+      p.karte.art = erlaubt(wert, ['ebene', 'seen', 'hochland', 'waelder', 'kueste'], p.karte.art);
+      /* Die Kartenart setzt Wasser und Berge neu vor. */
+      const vorgabe = { ebene: [0, 1], seen: [2, 1], hochland: [1, 3], waelder: [1, 1], kueste: [3, 1] }[p.karte.art];
+      if (vorgabe) { p.karte.wasser = vorgabe[0]; p.karte.berge = vorgabe[1]; }
+    }
+    if (feld === 'kartengroesse') p.karte.groesse = erlaubt(wert, ['klein', 'mittel', 'gross', 'riesig', 'gewaltig'], p.karte.groesse);
+    if (feld === 'wasser') p.karte.wasser = erlaubt(Number(wert), [0, 1, 2, 3], p.karte.wasser);
+    if (feld === 'berge') p.karte.berge = erlaubt(Number(wert), [0, 1, 2, 3], p.karte.berge);
+    if (feld === 'rohstoffe') p.karte.rohstoffe = erlaubt(Number(wert), [0, 1, 2], p.karte.rohstoffe);
     if (feld === 'bevGrenze') p.bevGrenze = erlaubt(Number(wert), [50, 100, 200], p.bevGrenze);
     if (feld === 'startgut') p.startgut = erlaubt(wert, ['normal', 'reich'], p.startgut);
     this.aendern(p);

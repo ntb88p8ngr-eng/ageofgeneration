@@ -24,12 +24,13 @@ die der Browser nur ueber `http://` laedt, nicht ueber `file://`.
 |---|---|
 | **Zeitalter** | Dunkle Zeit, Feudalzeit, Ritterzeit, Imperialzeit |
 | **Voelker** | Franken, Briten, Byzantiner, Mongolen — je drei Boni und eine Spezialeinheit |
-| **Gebaeude** | 16, vom Haus ueber Muehle, Kaserne, Stall, Belagerungswerkstatt, Markt, Kloster, Universitaet bis zu Burg, Turm, Mauer und Tor |
-| **Einheiten** | 15, vom Dorfbewohner ueber Speertraeger, Bogenschuetze, Ritter, Moench, Ramme, Mangonel und Trebuchet bis zu den vier Spezialeinheiten |
+| **Gebaeude** | 18, vom Haus ueber Muehle, Kaserne, Stall, Belagerungswerkstatt, Markt, Kloster, Universitaet bis zu Burg, Turm, Mauer, Tor, Bruecke und Hafen |
+| **Einheiten** | 18, vom Dorfbewohner ueber Speertraeger, Bogenschuetze, Ritter, Moench, Ramme, Mangonel und Trebuchet bis zu den vier Spezialeinheiten — dazu Fischerboot, Transporter und Galeere |
 | **Technologien** | 18: Schubkarre, Handkarre, Pflug, Waffen- und Ruestungsstufen, Ballistik, Mauerwerk, Wehrturm, Glaubenseifer … |
 | **Rohstoffe** | Nahrung, Holz, Gold, Stein — samt Markt mit schwankenden Preisen |
-| **Karten** | Ebene, Seenplatte, Hochland, Waelder in vier Groessen, aus einer Saat erzeugt |
-| **Spielarten** | Einzelspiel gegen bis zu sieben Rechnergegner (drei Schwierigkeitsgrade), Mehrspieler mit Teams, Zuschauermodus, Aufzeichnung und Wiedergabe |
+| **Karten** | Ebene, Seenplatte, Hochland, Waelder, Kueste in fuenf Groessen (bis 192x192), aus einer Saat erzeugt |
+| **Vor dem Start** | Kartenart und -groesse, Wasseranteil, Berge, Rohstoffreichtum, Teams, Bevoelkerungsgrenze, Startgut, Saat |
+| **Spielarten** | Einzelspiel gegen bis zu acht Rechnergegner (drei Schwierigkeitsgrade), Mehrspieler bis neun Spieler mit Teams, Zuschauermodus, Aufzeichnung und Wiedergabe |
 
 ## Steuerung
 
@@ -63,6 +64,9 @@ Wie im Vorbild, erweitert um die freie Kamera.
 | Boden | hingehen |
 | Feind | angreifen |
 | Wald, Erz, Wild, Beeren | sammeln |
+| Fischschwarm (mit Fischerboot) | fischen |
+| eigener Transporter | an Bord gehen |
+| Land (mit beladenem Transporter) | anlanden |
 | eigene Baustelle | mitbauen |
 | beschaedigtes Gebaeude | reparieren |
 | Farm | bestellen |
@@ -73,8 +77,9 @@ Wie im Vorbild, erweitert um die freie Kamera.
 **Bauen und Ausbilden** — mit gewaehlten Dorfbewohnern oeffnet jeder Buchstabe
 direkt den passenden Bau: `Q` Haus, `W` Muehle, `F` Farm, `R` Lager, `A` Kaserne,
 `S` Schuetzenstand, `D` Stall, `G` Belagerungswerkstatt, `M` Markt, `N` Kloster,
-`U` Universitaet, `C` Burg, `T` Turm, `Z` Mauer, `X` Tor, `E` Dorfzentrum.
-Mauern lassen sich mit gedrueckter Maustaste in einer Reihe ziehen. Ist ein
+`U` Universitaet, `C` Burg, `T` Turm, `Z` Mauer, `X` Tor, `E` Dorfzentrum,
+`H` Hafen, `B` Bruecke.
+Mauern und Bruecken lassen sich mit gedrueckter Maustaste in einer Reihe ziehen. Ist ein
 Gebaeude gewaehlt, bildet die Anfangstaste der Einheit sie aus — mit `Umschalt`
 gleich fuenf auf einmal.
 
@@ -152,6 +157,40 @@ Dorfzentrum, Burg, Turm und Tor sowie kleine Wimpel an den Militaergebaeuden;
 alles andere hat den Baustoff, der dazugehoert: Ziegel, Stroh, Holzschindeln,
 Schiefer, Kupfer. Zum Zuordnen genuegt das, weil Einheiten ihre Farbe voll
 tragen und die Minikarte ohnehin nach Spielern einfaerbt.
+
+### Wasser: Reviere, Schiffe, Bruecken
+
+Schiffe laufen auf einem **zweiten Hindernisgitter**. Was fuer Fussvolk gesperrt
+ist, ist fuer Boote frei und umgekehrt; Bruecken sind der Sonderfall, der zu Fuss
+begehbar und fuer Schiffe gesperrt bleibt. Damit ein Fischerboot nicht auf einen
+Schwarm zusteuert, der in einem anderen See liegt, bekommt jede zusammenhaengende
+Wasserflaeche eine Nummer — ihr **Revier**. Verglichen wird nur die Nummer, das
+kostet nichts und beantwortet die Frage „komme ich da ueberhaupt hin?“ ohne
+Wegsuche. Gezaehlt wird erst, wenn jemand fragt, und nur, wenn sich etwas
+geaendert hat: ein Hafen, eine Bruecke.
+
+Wichtig dabei: das Revier muss **dieselbe Nachbarschaftsregel** benutzen wie die
+Wegsuche. Um eine Ecke geht es nur, wenn beide angrenzenden Felder frei sind.
+Zaehlt das Revier grosszuegiger, meldet es Verbindungen, die kein Schiff befahren
+kann — dann faehrt das Boot los und bleibt stehen. Ein Test haelt beides
+zusammen.
+
+Auch der Kartengenerator zieht mit: reines Rauschen macht viele winzige
+Pfuetzen, in denen ein Boot nicht wenden kann. Gewaesser unter vierzehn Feldern
+werden darum trockengelegt, und Fisch kommt nur in Wasser, das mindestens
+zwanzig Felder gross ist. Die Kartenart „Kueste“ zieht zusaetzlich einen breiten
+Meerarm quer ueber die Karte — als Irrfahrt von Rand zu Rand, ohne
+Winkelfunktionen, damit jeder Rechner dieselbe Kuestenlinie erhaelt.
+
+### Warum beim Bauen der Boden eingeebnet wird
+
+Ein Gebaeude ist ein starres Modell; ein Hang darunter waere durch Wand und
+Weizenfeld hindurch zu sehen. Beim Setzen wird die Hoehe unter dem Grundriss
+darum gemittelt und gleichgezogen, und die zwei Felder ringsherum werden
+angeglichen — dreiviertel Gewicht am Rand, ein Viertel eins weiter aussen. So
+entsteht eine Terrasse statt einer Stufe. Ein Zaehler (`gelaendeVersion`) sagt
+der Anzeige, dass sie die Eckpunkte und Normalen des Gelaendes neu berechnen
+muss; das passiert nur, wenn wirklich planiert wurde.
 
 ### Warum der Boden fein gerastert aussieht
 

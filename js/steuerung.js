@@ -16,8 +16,11 @@
    ═══════════════════════════════════════════════════════════ */
 'use strict';
 
-import { FP, GEBAEUDE, EINHEITEN, TECHS, spezialEinheit } from './regeln.js';
+import { FP, GEBAEUDE, EINHEITEN, TECHS, BODEN, spezialEinheit } from './regeln.js';
 import { VORKOMMEN_LISTE } from './karte.js';
+
+/* Nummer des Fischvorkommens im Kachelfeld (0 = leer). */
+const FISCH_NR = VORKOMMEN_LISTE.indexOf('fisch') + 1;
 
 export class Steuerung {
   constructor(spiel) {
@@ -184,6 +187,20 @@ export class Steuerung {
       spiel.klang('befehl');
       return;
     }
+    /* Eigener Transporter → einsteigen. */
+    if (ziel && ziel.art !== 'gebaeude' && ziel.spieler === spiel.spielerId
+        && EINHEITEN[ziel.typ] && EINHEITEN[ziel.typ].plaetze) {
+      const landvolk = ids.filter(id => {
+        const u = sim.nachId.get(id);
+        return u && !EINHEITEN[u.typ].wasser;
+      });
+      if (landvolk.length) {
+        spiel.senden({ a: 'einsteigen', ids: landvolk, ziel: ziel.id });
+        spiel.hinweis('An Bord gehen');
+        spiel.klang('befehl');
+        return;
+      }
+    }
     /* Eigenes Gebaeude → bauen, reparieren oder ackern. */
     if (ziel && ziel.art === 'gebaeude' && sim.verbuendet(spiel.spielerId, ziel.spieler)) {
       const def = GEBAEUDE[ziel.typ];
@@ -194,13 +211,33 @@ export class Steuerung {
     }
     if (!punkt) return;
     const kx = punkt.x | 0, ky = punkt.z | 0;
-    /* Rohstoffkachel → sammeln. */
     const i = ky * sim.karte.breite + kx;
-    if (kx >= 0 && ky >= 0 && kx < sim.karte.breite && ky < sim.karte.hoehe
-        && sim.karte.vorkommen[i] && sim.karte.menge[i] > 0) {
+    const aufKarte = kx >= 0 && ky >= 0 && kx < sim.karte.breite && ky < sim.karte.hoehe;
+
+    /* Beladener Transporter + Klick an Land → anlanden. */
+    if (aufKarte && sim.karte.boden[i] !== BODEN.wasser) {
+      const frachter = ids.filter(id => {
+        const u = sim.nachId.get(id);
+        return u && u.fracht && u.fracht.length;
+      });
+      if (frachter.length) {
+        spiel.senden({ a: 'ausladen', ids: frachter,
+                       x: Math.round(punkt.x * FP), y: Math.round(punkt.z * FP) });
+        const rest = ids.filter(id => frachter.indexOf(id) < 0);
+        if (rest.length) spiel.senden({ a: 'gehen', ids: rest, x: Math.round(punkt.x * FP), y: Math.round(punkt.z * FP), anhaengen });
+        spiel.hinweis('Anlanden');
+        spiel.klang('befehl');
+        return;
+      }
+    }
+
+    /* Rohstoffkachel → sammeln. Fisch holen nur Boote. */
+    if (aufKarte && sim.karte.vorkommen[i] && sim.karte.menge[i] > 0) {
+      const istFisch = sim.karte.vorkommen[i] === FISCH_NR;
       const sammler = ids.filter(id => {
         const u = sim.nachId.get(id);
-        return u && sim.werte(u.spieler, u.typ).kannSammeln;
+        if (!u || !sim.werte(u.spieler, u.typ).kannSammeln) return false;
+        return istFisch === !!EINHEITEN[u.typ].wasser;
       });
       if (sammler.length) {
         spiel.senden({ a: 'sammeln', ids: sammler, kx, ky, anhaengen });

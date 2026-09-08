@@ -33,8 +33,11 @@
             <option value="1">1 Gegner</option>
             <option value="2">2 Gegner</option>
             <option value="3" selected>3 Gegner</option>
+            <option value="4">4 Gegner</option>
             <option value="5">5 Gegner</option>
+            <option value="6">6 Gegner</option>
             <option value="7">7 Gegner</option>
+            <option value="8">8 Gegner</option>
           </select>
         </label>
         <label>Schwierigkeit
@@ -60,6 +63,17 @@
         </label>
       </div>
       <div class="feldreihe">
+        <label>Wasser
+          <select id="e-wasser"></select>
+        </label>
+        <label>Berge
+          <select id="e-berge"></select>
+        </label>
+        <label>Rohstoffe
+          <select id="e-rohstoffe"></select>
+        </label>
+      </div>
+      <div class="feldreihe">
         <label>Bevoelkerung
           <select id="e-bev">
             <option value="50">50</option>
@@ -77,6 +91,7 @@
           <input id="e-saat" type="text" placeholder="zufaellig" size="8">
         </label>
       </div>
+      <p id="e-kartentext" class="hinweistext"></p>
       <p id="e-volkstext" class="hinweistext"></p>
       <button id="e-start-knopf" class="grossknopf">Partie beginnen</button>
     </section>

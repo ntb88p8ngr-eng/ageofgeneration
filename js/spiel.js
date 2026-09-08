@@ -19,7 +19,7 @@ import {
   FP, TAKT_MS, RUNDE_TAKTE, GEBAEUDE, EINHEITEN, ZEITALTER, VOELKER, VOLK_LISTE,
   FARBEN, ROHSTOFF_NAME, kosten as kostenVon
 } from './regeln.js';
-import { KARTEN_ARTEN, KARTEN_GROESSEN } from './karte.js';
+import { KARTEN_ARTEN, KARTEN_GROESSEN, WASSER_STUFEN, BERG_STUFEN, ROHSTOFF_STUFEN } from './karte.js';
 import { TECHS } from './regeln.js';
 
 const TECHS_NAME = Object.fromEntries(Object.entries(TECHS).map(([k, v]) => [k, v.name]));
@@ -74,6 +74,34 @@ const Spiel = {
       if (id === 'mittel') o.selected = true;
       groesse.appendChild(o);
     }
+    /* Die drei Regler. Wer die Kartenart wechselt, bekommt deren
+       Vorgaben vorgesetzt und kann sie danach einzeln aendern. */
+    const regler = (id, liste, vorgabe) => {
+      const el = document.getElementById(id);
+      el.innerHTML = '';
+      liste.forEach((eintrag, i) => {
+        const o = document.createElement('option');
+        o.value = i; o.textContent = eintrag.name;
+        if (i === vorgabe) o.selected = true;
+        el.appendChild(o);
+      });
+      return el;
+    };
+    const wasserEl = regler('e-wasser', WASSER_STUFEN, KARTEN_ARTEN[karte.value].wasser);
+    const bergEl = regler('e-berge', BERG_STUFEN, KARTEN_ARTEN[karte.value].berge);
+    regler('e-rohstoffe', ROHSTOFF_STUFEN, 1);
+    const zeigeKarte = () => {
+      const a = KARTEN_ARTEN[karte.value];
+      document.getElementById('e-kartentext').textContent = a.beschreibung;
+    };
+    karte.onchange = () => {
+      const a = KARTEN_ARTEN[karte.value];
+      wasserEl.value = String(a.wasser);
+      bergEl.value = String(a.berge);
+      zeigeKarte();
+    };
+    zeigeKarte();
+
     const zeigeVolk = () => {
       const v = VOELKER[volk.value];
       document.getElementById('e-volkstext').innerHTML =
@@ -147,7 +175,13 @@ const Spiel = {
     }
     const aufbau = {
       saat,
-      karte: { art: document.getElementById('e-karte').value, groesse: document.getElementById('e-groesse').value },
+      karte: {
+        art: document.getElementById('e-karte').value,
+        groesse: document.getElementById('e-groesse').value,
+        wasser: Number(document.getElementById('e-wasser').value),
+        berge: Number(document.getElementById('e-berge').value),
+        rohstoffe: Number(document.getElementById('e-rohstoffe').value)
+      },
       bevGrenze: Number(document.getElementById('e-bev').value),
       startgut: document.getElementById('e-start').value,
       spieler
@@ -267,7 +301,7 @@ const Spiel = {
         volk.onchange = () => this.netz.platz('volk', { platz: i, wert: volk.value }).catch(() => {});
         z.appendChild(volk);
         const team = document.createElement('select');
-        for (let t = 1; t <= 4; t++) {
+        for (let t = 1; t <= 9; t++) {
           const o = document.createElement('option');
           o.value = t; o.textContent = 'Team ' + t;
           if (pl.team === t) o.selected = true;
@@ -319,6 +353,9 @@ const Spiel = {
     };
     feld('Karte', 'kartenart', Object.entries(KARTEN_ARTEN).map(([k, v]) => [k, v.name]), partie.karte.art);
     feld('Groesse', 'kartengroesse', Object.entries(KARTEN_GROESSEN).map(([k, v]) => [k, v.name]), partie.karte.groesse);
+    feld('Wasser', 'wasser', WASSER_STUFEN.map((s, i) => [i, s.name]), partie.karte.wasser);
+    feld('Berge', 'berge', BERG_STUFEN.map((s, i) => [i, s.name]), partie.karte.berge);
+    feld('Rohstoffe', 'rohstoffe', ROHSTOFF_STUFEN.map((s, i) => [i, s.name]), partie.karte.rohstoffe);
     feld('Bevoelkerung', 'bevGrenze', [[50, '50'], [100, '100'], [200, '200']], partie.bevGrenze);
     feld('Startgut', 'startgut', [['normal', 'Normal'], ['reich', 'Reich']], partie.startgut);
 

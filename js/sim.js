@@ -19,7 +19,7 @@
 import {
   FP, TAKTE_PRO_S, RUNDE_TAKTE, tempoFP, takte,
   ROHSTOFFE, ZEITALTER, VOELKER, GEBAEUDE, EINHEITEN, TECHS, STUFEN_WIRKUNG,
-  VORKOMMEN, SAMMELTEMPO, TRAGKRAFT, HANDEL, BODEN,
+  VORKOMMEN, SAMMELTEMPO, TRAGKRAFT, TRAGKRAFT_BOOT, HANDEL, BODEN,
   kosten as kostenVon, aufstiegKosten, spezialEinheit
 } from './regeln.js';
 import { Zufall, iwurzel, abstand2, klemme, summe32 } from './zufall.js';
@@ -30,7 +30,8 @@ import { KI } from './ki.js';
 /* Zustaende einer Einheit. */
 export const ZUSTAND = {
   ruhig: 0, gehen: 1, sammeln: 2, zurueck: 3, bauen: 4,
-  angreifen: 5, folgen: 6, heilen: 7, bekehren: 8, reparieren: 9, tot: 10
+  angreifen: 5, folgen: 6, heilen: 7, bekehren: 8, reparieren: 9, tot: 10,
+  einsteigen: 11, ausladen: 12
 };
 
 export const HALTUNG = { aggressiv: 0, defensiv: 1, stellung: 2, passiv: 3 };
@@ -62,17 +63,30 @@ export class Sim {
     this.sieger = null;      // Team-Nummer oder null
     this.ereignisse = [];    // fuer Ton und Meldungen, wird je Takt geleert
 
+    const kOpt = aufbau.karte || {};
     this.karte = erzeugeKarte({
       saat: aufbau.saat,
-      groesse: aufbau.karte ? aufbau.karte.groesse : 'mittel',
-      art: aufbau.karte ? aufbau.karte.art : 'ebene',
-      plaetze: aufbau.spieler.length
+      groesse: kOpt.groesse || 'mittel',
+      art: kOpt.art || 'ebene',
+      plaetze: aufbau.spieler.length,
+      wasser: kOpt.wasser,
+      berge: kOpt.berge,
+      rohstoffe: kOpt.rohstoffe,
+      wald: kOpt.wald
     });
     const n = this.karte.breite * this.karte.hoehe;
 
-    /* Statisches Hindernisgitter fuer die Wegsuche. */
+    /* Zwei Hindernisgitter: eines fuer alles, was laeuft, eines fuer
+       alles, was schwimmt. Bruecken sind fuer Fussvolk frei und fuer
+       Schiffe gesperrt — ein Schiff faehrt nicht unter der Bruecke
+       durch, das waere zu viel verlangt fuer ein Ruderboot. */
     this.sperre = new Uint8Array(n);
+    this.sperreWasser = new Uint8Array(n);
     this.belegt = new Int32Array(n);   // Gebaeude-Nummer + 1 je Kachel
+    this.gelaendeVersion = 0;          // zaehlt Planierungen, die Anzeige zieht nach
+    this.wasserRevier = new Int32Array(n).fill(-1);  // zusammenhaengende Gewaesser
+    this.revierZahl = [];              // Feldzahl je Gewaesser
+    this.revierAlt = true;             // muss neu gezaehlt werden
     this.hindernisAufbauen();
     this.pfadfinder = new Pfadfinder(this.karte.breite, this.karte.hoehe);
     this.pfadWarteschlange = [];
@@ -250,15 +264,118 @@ export class Sim {
   hindernisAufbauen() {
     const k = this.karte;
     for (let y = 0; y < k.hoehe; y++) for (let x = 0; x < k.breite; x++) {
-      const i = y * k.breite + x;
-      this.sperre[i] = begehbar(k, x, y) ? 0 : GESPERRT;
+      this.sperreSetzen(x, y);
     }
   }
 
   sperreSetzen(x, y) {
+    const k = this.karte;
     const i = this.kachelIdx(x, y);
-    const frei = begehbar(this.karte, x, y) && !this.belegt[i];
-    this.sperre[i] = frei ? 0 : GESPERRT;
+    const bau = this.belegt[i] ? this.nachId.get(this.belegt[i]) : null;
+    const def = bau && !bau.tot ? GEBAEUDE[bau.typ] : null;
+
+    /* Zu Fuss: alles frei, was begehbar und unbebaut ist — Bruecken
+       und Tore ausgenommen, die darf man betreten. */
+    const zuFuss = (def && def.begehbar) ? true : (begehbar(k, x, y) && !this.belegt[i]);
+    this.sperre[i] = zuFuss ? 0 : GESPERRT;
+
+    /* Zu Wasser: nur Wasserfelder ohne Bauwerk darauf. */
+    const wasser = k.boden[i] === BODEN.wasser && !this.belegt[i];
+    const vorher = this.sperreWasser[i];
+    this.sperreWasser[i] = wasser ? 0 : GESPERRT;
+    if (vorher !== this.sperreWasser[i]) this.revierAlt = true;
+  }
+
+  /* ─────────────── Gewaesser ───────────────
+     Boote sollen nicht auf Fischschwaerme zusteuern, die in einem
+     anderen See liegen. Darum bekommt jede zusammenhaengende
+     Wasserflaeche eine Nummer; verglichen wird nur die Nummer. Gezaehlt
+     wird erst, wenn jemand fragt — und nur, wenn sich etwas geaendert
+     hat (ein Hafen, eine Bruecke). */
+
+  revierAufbauen() {
+    const k = this.karte, n = k.breite * k.hoehe;
+    this.wasserRevier.fill(-1);
+    this.revierZahl = [];
+    let nummer = 0;
+    const stapel = [];
+    for (let i = 0; i < n; i++) {
+      if (this.wasserRevier[i] >= 0 || this.sperreWasser[i] === GESPERRT) continue;
+      this.wasserRevier[i] = nummer;
+      stapel.length = 0; stapel.push(i);
+      let zahl = 0;
+      while (stapel.length) {
+        const j = stapel.pop();
+        zahl++;
+        const x = j % k.breite, y = (j / k.breite) | 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (!drin(k, nx, ny)) continue;
+          const t = ny * k.breite + nx;
+          if (this.wasserRevier[t] >= 0 || this.sperreWasser[t] === GESPERRT) continue;
+          /* Genau wie die Wegsuche: um die Ecke geht es nur, wenn
+             beide angrenzenden Felder frei sind. Sonst meldet das
+             Revier eine Verbindung, die kein Schiff befahren kann. */
+          if (dx && dy) {
+            if (this.sperreWasser[y * k.breite + nx] === GESPERRT) continue;
+            if (this.sperreWasser[ny * k.breite + x] === GESPERRT) continue;
+          }
+          this.wasserRevier[t] = nummer; stapel.push(t);
+        }
+      }
+      this.revierZahl.push(zahl);
+      nummer++;
+    }
+    this.revierAlt = false;
+  }
+
+  /** Gewaessernummer einer Kachel (-1 = kein befahrbares Wasser). */
+  revier(x, y) {
+    if (this.revierAlt) this.revierAufbauen();
+    if (!drin(this.karte, x, y)) return -1;
+    return this.wasserRevier[y * this.karte.breite + x];
+  }
+
+  /** Wie viele Felder hat dieses Gewaesser? */
+  revierGroesse(nummer) {
+    if (this.revierAlt) this.revierAufbauen();
+    return nummer < 0 ? 0 : (this.revierZahl[nummer] || 0);
+  }
+
+  /** Gewaessernummer, in dem ein Schiff gerade schwimmt. */
+  revierVon(e) {
+    const r = this.revier(this.kx(e), this.ky(e));
+    if (r >= 0) return r;
+    /* Liegt es gerade an einem Hafen fest, zaehlt das Wasser daneben. */
+    for (let d = 1; d <= 2; d++) {
+      for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+        const n = this.revier(this.kx(e) + dx, this.ky(e) + dy);
+        if (n >= 0) return n;
+      }
+    }
+    return -1;
+  }
+
+  /** Erreicht ein Boot diese Kachel ueber Wasser? */
+  wasserErreichbar(e, kx, ky) {
+    const r = this.revierVon(e);
+    if (r < 0) return false;
+    if (this.revier(kx, ky) === r) return true;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (this.revier(kx + dx, ky + dy) === r) return true;
+    }
+    return false;
+  }
+
+  /** Faehrt diese Einheit auf dem Wasser? */
+  istSchiff(e) {
+    const def = EINHEITEN[e.typ];
+    return !!(def && def.wasser);
+  }
+
+  /** Das passende Hindernisgitter fuer eine Einheit. */
+  gitterFuer(e) {
+    return this.istSchiff(e) ? this.sperreWasser : this.sperre;
   }
 
   /* ─────────────── Aufstellung ───────────────
@@ -298,7 +415,7 @@ export class Sim {
       zielId: 0, angriffRest: 0, ladung: 0, ladungArt: null, sammelRest: 0,
       quelleI: -1, abgabeId: 0, bauId: 0, bekehrRest: 0, ruheRest: 0,
       steckRest: 0, warteRest: 0, bauVersuche: 0, abgabeVersuche: 0, letzteArbeit: null,
-      tot: false, neu: true
+      verladen: 0, fracht: [], meidetQuelle: -1, fehlAnlauf: 0, tot: false, neu: true
     };
     this.einheiten.push(e);
     this.nachId.set(e.id, e);
@@ -314,6 +431,25 @@ export class Sim {
     if (!def) return false;
     const g = def.groesse;
     const k = this.karte;
+
+    /* Bruecken gehoeren aufs Wasser und muessen an Land oder an eine
+       andere Bruecke anschliessen — sonst baute man Inseln ins Meer. */
+    if (def.aufWasser) {
+      if (!drin(k, kx, ky)) return false;
+      const i = ky * k.breite + kx;
+      if (k.boden[i] !== BODEN.wasser || this.belegt[i] || k.vorkommen[i]) return false;
+      if (!ignoriereSicht && !this.spieler[spielerId].erkundet[i]) return false;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const x = kx + dx, y = ky + dy;
+        if (!drin(k, x, y)) continue;
+        const j = y * k.breite + x;
+        if (k.boden[j] !== BODEN.wasser) return true;                 // Ufer
+        const nb = this.belegt[j] ? this.nachId.get(this.belegt[j]) : null;
+        if (nb && !nb.tot && GEBAEUDE[nb.typ].aufWasser) return true;  // Bruecke
+      }
+      return false;
+    }
+
     for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
       if (!drin(k, x, y)) return false;
       const i = y * k.breite + x;
@@ -369,10 +505,30 @@ export class Sim {
       if (luft < 2) return false;
     }
 
-    /* Flaches Gelaende verlangt: kein Bau ueber Hangkanten. */
+    /* Flaches Gelaende verlangt: kein Bau ueber Hangkanten. Was
+       leicht wellig ist, wird beim Setzen eingeebnet. */
     const h0 = k.hoehen[ky * k.breite + kx];
     for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
       if (Math.abs(k.hoehen[y * k.breite + x] - h0) > 1) return false;
+    }
+
+    /* Der Hafen braucht Wasser vor der Tuer — sonst laeuft kein
+       Schiff vom Stapel. */
+    if (def.amUfer) {
+      let wasser = 0, revier = -1;
+      for (let y = ky - 1; y <= ky + g; y++) {
+        for (let x = kx - 1; x <= kx + g; x++) {
+          if (!drin(k, x, y)) continue;
+          if (x >= kx && x < kx + g && y >= ky && y < ky + g) continue;
+          if (k.boden[y * k.breite + x] !== BODEN.wasser) continue;
+          wasser++;
+          if (revier < 0) revier = this.revier(x, y);
+        }
+      }
+      if (wasser < 3) return false;
+      /* In einer Pfuetze liegt ein Hafen falsch: die Boote koennten
+         nirgends hinfahren. */
+      if (revier < 0 || this.revierGroesse(revier) < 20) return false;
     }
     return true;
   }
@@ -389,17 +545,98 @@ export class Sim {
       fertig: !!fertig, bauFortschritt: fertig ? w.bauTakte * 10 : 0, bauGesamt: w.bauTakte * 10,
       warteschlange: [], forschung: null, treffpunkt: null,
       vorrat: def.vorrat || 0, angriffRest: 0, bauer: 0,
-      tot: false, neu: true
+      drehung: 0, tot: false, neu: true
     };
+    /* Der Hafen kehrt dem Land den Ruecken: sein Steg soll ins Wasser
+       zeigen, nicht in die Wiese. Gedreht wird in Vierteln, damit die
+       Kachelbelegung dieselbe bleibt. */
+    if (def.amUfer) b.drehung = this.uferrichtung(kx, ky, g);
     this.gebaeude.push(b);
     this.nachId.set(b.id, b);
     for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
-      const i = y * this.karte.breite + x;
-      this.belegt[i] = b.id;
-      this.sperre[i] = GESPERRT;
+      this.belegt[y * this.karte.breite + x] = b.id;
+    }
+    /* Boden unter dem Bauwerk einebnen, damit es nicht im Hang
+       versinkt oder in der Luft haengt. Bruecken und Aecker bleiben
+       aussen vor: die eine liegt auf dem Wasser, der andere folgt
+       dem Gelaende ohnehin. */
+    if (!def.aufWasser) this.planieren(kx, ky, g);
+    for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
+      this.sperreSetzen(x, y);
     }
     if (fertig) this.gebaeudeFertig(b);
     return b;
+  }
+
+  /**
+   * In welche Vierteldrehung zeigt das meiste Wasser? 0 = nach +z
+   * (so ist das Hafenmodell gebaut), dann im Uhrzeigersinn.
+   */
+  uferrichtung(kx, ky, g) {
+    const k = this.karte;
+    /* Vier Streifen ausserhalb des Grundrisses abzaehlen. */
+    /* Reihenfolge wie die Drehung sie abbildet: eine Drehung um
+       r Viertel um die Hochachse schiebt +z nach +z, +x, -z, -x. */
+    const zahl = [0, 0, 0, 0];
+    for (let d = 1; d <= 3; d++) {
+      for (let i = -1; i <= g; i++) {
+        const felder = [
+          [kx + i, ky + g - 1 + d],  // +z
+          [kx + g - 1 + d, ky + i],  // +x
+          [kx + i, ky - d],          // -z
+          [kx - d, ky + i]           // -x
+        ];
+        for (let r = 0; r < 4; r++) {
+          const [x, y] = felder[r];
+          if (!drin(k, x, y)) continue;
+          if (k.boden[y * k.breite + x] === BODEN.wasser) zahl[r] += 4 - d;
+        }
+      }
+    }
+    let beste = 0;
+    for (let r = 1; r < 4; r++) if (zahl[r] > zahl[beste]) beste = r;
+    return beste;
+  }
+
+  /**
+   * Ebnet den Boden unter einem Bauwerk ein und laesst ihn nach
+   * aussen weich auslaufen. Ohne das stehen Gebaeude im Hang schief
+   * im Boden: Ihre Grundflaeche ist flach, das Gelaende nicht — und
+   * eine Ecke verschwindet im Berg, die andere schwebt.
+   */
+  planieren(kx, ky, g) {
+    const k = this.karte;
+    let summe = 0, zahl = 0;
+    for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
+      if (!drin(k, x, y)) continue;
+      summe += k.hoehen[y * k.breite + x]; zahl++;
+    }
+    if (!zahl) return;
+    const h = Math.round(summe / zahl);
+    let geaendert = false;
+    for (let y = ky; y < ky + g; y++) for (let x = kx; x < kx + g; x++) {
+      if (!drin(k, x, y)) continue;
+      const i = y * k.breite + x;
+      if (k.hoehen[i] !== h) { k.hoehen[i] = h; geaendert = true; }
+    }
+    /* Zwei Kacheln Uebergang nach aussen, damit keine Stufenkante
+       entsteht — je naeher am Bau, desto staerker angeglichen. */
+    for (let y = ky - 2; y < ky + g + 2; y++) {
+      for (let x = kx - 2; x < kx + g + 2; x++) {
+        if (!drin(k, x, y)) continue;
+        const innen = x >= kx && x < kx + g && y >= ky && y < ky + g;
+        if (innen) continue;
+        const abstand = Math.max(
+          Math.max(kx - x, x - (kx + g - 1)),
+          Math.max(ky - y, y - (ky + g - 1)));
+        const i = y * k.breite + x;
+        if (k.boden[i] === BODEN.wasser) continue;
+        const gewicht = abstand === 1 ? 3 : 1;   // von vier Teilen
+        const neu = Math.round((k.hoehen[i] * (4 - gewicht) + h * gewicht) / 4);
+        if (k.hoehen[i] !== neu) { k.hoehen[i] = neu; geaendert = true; }
+      }
+    }
+    if (geaendert) this.gelaendeVersion++;
   }
 
   gebaeudeFertig(b) {
@@ -416,6 +653,14 @@ export class Sim {
   einheitTot(e, taeter) {
     if (e.tot) return;
     e.tot = true; e.zustand = ZUSTAND.tot;
+    /* Geht ein Transporter unter, ertrinkt, was an Bord war. */
+    if (e.fracht && e.fracht.length) {
+      for (const id of e.fracht.slice()) {
+        const mit = this.nachId.get(id);
+        if (mit && !mit.tot) { mit.verladen = 0; this.einheitTot(mit, taeter); }
+      }
+      e.fracht.length = 0;
+    }
     const w = this.werte(e.spieler, e.typ);
     const p = this.spieler[e.spieler];
     p.bev -= w.bev;
@@ -486,6 +731,8 @@ export class Sim {
       case 'treffpunkt':  return this.cmdTreffpunkt(p, c);
       case 'abreissen':   return this.cmdAbreissen(p, c);
       case 'handel':      return this.cmdHandel(p, c);
+      case 'einsteigen':  return this.cmdEinsteigen(p, c);
+      case 'ausladen':    return this.cmdAusladen(p, c);
       case 'heilen':      return this.cmdHeilen(p, c);
       case 'bekehren':    return this.cmdBekehren(p, c);
       case 'aufgeben':    return this.cmdAufgeben(p, c);
@@ -569,6 +816,13 @@ export class Sim {
           b = { art: 'ackern', ziel: g.id };
         }
       } else if (drin(k, c.kx, c.ky) && k.vorkommen[this.kachelIdx(c.kx, c.ky)]) {
+        /* Fisch holen nur Boote, alles Uebrige nur Landleute. */
+        const istFisch = k.vorkommen[this.kachelIdx(c.kx, c.ky)] === VORKOMMEN_LISTE.indexOf('fisch') + 1;
+        if (istFisch !== this.istSchiff(e)) continue;
+        if (istFisch && !this.wasserErreichbar(e, c.kx, c.ky)) {
+          this.ereignisse.push({ art: 'meldung', spieler: e.spieler, text: 'Dorthin fuehrt kein Wasserweg.' });
+          continue;
+        }
         b = { art: 'sammeln', kx: c.kx, ky: c.ky };
       }
       if (!b) continue;
@@ -773,6 +1027,59 @@ export class Sim {
     }
   }
 
+  /* ─────────────── Transportschiffe ───────────────
+     Ein Transporter nimmt Landeinheiten auf und setzt sie am anderen
+     Ufer wieder ab. Wer an Bord ist, verschwindet aus der Welt: er
+     rechnet nicht mit, wird nicht getroffen und sieht nichts — dafuer
+     zaehlt er weiter zur Bevoelkerung. */
+
+  cmdEinsteigen(p, c) {
+    const schiff = this.nachId.get(c.ziel);
+    if (!schiff || schiff.tot || schiff.spieler !== p.id) return;
+    const plaetze = EINHEITEN[schiff.typ] && EINHEITEN[schiff.typ].plaetze;
+    if (!plaetze) return;
+    for (const e of this.meineEinheiten(p, c.ids)) {
+      if (this.istSchiff(e) || e.verladen) continue;
+      this.befehlSetzen(e, { art: 'einsteigen', ziel: schiff.id });
+    }
+  }
+
+  cmdAusladen(p, c) {
+    for (const schiff of this.meineEinheiten(p, c.ids)) {
+      if (!schiff.fracht || !schiff.fracht.length) continue;
+      /* x/y kommen wie bei „gehen“ in Fixpunkt herein. */
+      this.befehlSetzen(schiff, { art: 'ausladen', x: c.x | 0, y: c.y | 0 });
+    }
+  }
+
+  /** Setzt die Fracht an Land ab. Gibt zurueck, wieviel von Bord ging. */
+  ausladenVersuchen(schiff) {
+    if (!schiff.fracht || !schiff.fracht.length) return 0;
+    const k = this.karte;
+    const mx = this.kx(schiff), my = this.ky(schiff);
+    let abgesetzt = 0;
+    for (let r = 1; r <= 3 && schiff.fracht.length; r++) {
+      for (let dy = -r; dy <= r && schiff.fracht.length; dy++) {
+        for (let dx = -r; dx <= r && schiff.fracht.length; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = mx + dx, y = my + dy;
+          if (!drin(k, x, y)) continue;
+          if (this.sperre[y * k.breite + x] === GESPERRT) continue;
+          const id = schiff.fracht.shift();
+          const e = this.nachId.get(id);
+          if (!e || e.tot) continue;
+          e.verladen = 0;
+          e.x = x * FP + FP / 2; e.y = y * FP + FP / 2;
+          e.altX = e.x; e.altY = e.y;
+          this.befehlSetzen(e, null);
+          abgesetzt++;
+        }
+      }
+    }
+    if (abgesetzt) this.ereignisse.push({ art: 'ausgeladen', spieler: schiff.spieler, x: schiff.x, y: schiff.y, zahl: abgesetzt });
+    return abgesetzt;
+  }
+
   cmdHeilen(p, c) {
     const ziel = this.nachId.get(c.ziel);
     if (!ziel || ziel.tot || ziel.art !== 'einheit' || !this.verbuendet(p.id, ziel.spieler)) return;
@@ -853,6 +1160,15 @@ export class Sim {
         this.zumGebaeude(e, g);
         break;
       }
+      case 'einsteigen': {
+        const z = this.nachId.get(b.ziel);
+        if (!z || z.tot) { this.befehlSetzen(e, null); return; }
+        e.zielId = z.id; e.zustand = ZUSTAND.einsteigen;
+        break;
+      }
+      case 'ausladen':
+        e.zustand = ZUSTAND.ausladen;
+        break;
       case 'heilen': case 'bekehren': {
         const z = this.nachId.get(b.ziel);
         if (!z || z.tot) { this.befehlSetzen(e, null); return; }
@@ -911,13 +1227,17 @@ export class Sim {
   /** Freies Feld am Rand eines Gebaeudes, moeglichst nah an der Einheit. */
   randKachel(e, b) {
     const g = b.groesse;
+    const gitter = this.gitterFuer(e);
     let bestes = null, bestD = Infinity;
-    for (let y = b.ky - 1; y <= b.ky + g; y++) {
-      for (let x = b.kx - 1; x <= b.kx + g; x++) {
-        const amRand = (x === b.kx - 1 || x === b.kx + g || y === b.ky - 1 || y === b.ky + g);
-        if (!amRand) continue;
+    /* Fuer Schiffe wird der Ring weiter gezogen: das Wasser faengt
+       oft erst zwei Felder neben dem Hafen an. */
+    const weite = this.istSchiff(e) ? 3 : 1;
+    for (let y = b.ky - weite; y <= b.ky + g - 1 + weite; y++) {
+      for (let x = b.kx - weite; x <= b.kx + g - 1 + weite; x++) {
+        const drinnen = x >= b.kx && x < b.kx + g && y >= b.ky && y < b.ky + g;
+        if (drinnen) continue;
         if (!drin(this.karte, x, y)) continue;
-        if (this.sperre[y * this.karte.breite + x] === GESPERRT) continue;
+        if (gitter[y * this.karte.breite + x] === GESPERRT) continue;
         const d = abstand2(e.x, e.y, x * FP + FP / 2, y * FP + FP / 2);
         if (d < bestD) { bestD = d; bestes = [x, y]; }
       }
@@ -927,11 +1247,12 @@ export class Sim {
 
   /** Freies Feld neben einer Rohstoffkachel. */
   nachbarKachel(e, kx, ky) {
+    const gitter = this.gitterFuer(e);
     let bestes = null, bestD = Infinity;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const x = kx + dx, y = ky + dy;
       if (!drin(this.karte, x, y)) continue;
-      if (this.sperre[y * this.karte.breite + x] === GESPERRT) continue;
+      if (gitter[y * this.karte.breite + x] === GESPERRT) continue;
       const d = abstand2(e.x, e.y, x * FP + FP / 2, y * FP + FP / 2);
       if (d < bestD) { bestD = d; bestes = [x, y]; }
     }
@@ -941,8 +1262,12 @@ export class Sim {
   /** Steht die Einheit direkt am Gebaeude (Ring rundherum)? */
   amGebaeude(e, b) {
     const kx = this.kx(e), ky = this.ky(e);
-    return kx >= b.kx - 1 && kx <= b.kx + b.groesse &&
-           ky >= b.ky - 1 && ky <= b.ky + b.groesse;
+    /* Ein Boot legt nicht an der Hauswand an — vor dem Hafen liegen
+       oft zwei, drei Felder Wasser. Fuer Schiffe zaehlt darum der
+       weitere Ring, sonst pendeln sie ewig vor der Anlegestelle. */
+    const r = this.istSchiff(e) ? 3 : 1;
+    return kx >= b.kx - r && kx <= b.kx + b.groesse - 1 + r &&
+           ky >= b.ky - r && ky <= b.ky + b.groesse - 1 + r;
   }
 
   /** Steht die Einheit neben der Kachel? */
@@ -1002,16 +1327,18 @@ export class Sim {
     const sx = this.kx(e), sy = this.ky(e);
     const zx = (e.zielX / FP) | 0, zy = (e.zielY / FP) | 0;
     if (sx === zx && sy === zy) { e.pfad = null; e.pfadI = 0; return; }
+    const schiff = this.istSchiff(e);
+    const gitter = schiff ? this.sperreWasser : this.sperre;
     const team = this.spieler[e.spieler].team;
-    const tore = this.toreOeffnen(team);
-    const weg = this.pfadfinder.suche(this.sperre, sx, sy, zx, zy, {
+    const tore = schiff ? [] : this.toreOeffnen(team);
+    const weg = this.pfadfinder.suche(gitter, sx, sy, zx, zy, {
       maxKnoten: this.knotenBudget || 4500,
       naheGenug: e.pfadNahe || 0,
       zielSperreEgal: true
     });
-    this.toreSchliessen(tore);
+    if (!schiff) this.toreSchliessen(tore);
     if (!weg || !weg.length) { e.pfad = null; e.pfadI = 0; return; }
-    e.pfad = this.pfadfinder.glaetten(this.sperre, weg, sx, sy);
+    e.pfad = this.pfadfinder.glaetten(gitter, weg, sx, sy);
     e.pfadI = 0;
   }
 
@@ -1075,6 +1402,7 @@ export class Sim {
     const kx = (x / FP) | 0, ky = (y / FP) | 0;
     if (!drin(this.karte, kx, ky)) return false;
     const i = ky * this.karte.breite + kx;
+    if (this.istSchiff(e)) return this.sperreWasser[i] !== GESPERRT;
     if (this.sperre[i] !== GESPERRT) return true;
     /* Eigene Tore und das eigene Bauziel duerfen betreten werden. */
     const bId = this.belegt[i];
@@ -1115,7 +1443,7 @@ export class Sim {
     this.gitterBauen();
     this.pfadeAbarbeiten();
 
-    for (const e of this.einheiten) if (!e.tot) this.einheitTakt(e);
+    for (const e of this.einheiten) if (!e.tot && !e.verladen) this.einheitTakt(e);
     this.abstossen();
     for (const b of this.gebaeude) if (!b.tot) this.gebaeudeTakt(b);
     this.geschosseTakt();
@@ -1157,7 +1485,7 @@ export class Sim {
       for (let i = 0; i < this.zellen.length; i++) this.zellen[i].length = 0;
     }
     for (const e of this.einheiten) {
-      if (e.tot) continue;
+      if (e.tot || e.verladen) continue;
       const zx = klemme((e.x / (FP * zw)) | 0, 0, this.zb - 1);
       const zy = klemme((e.y / (FP * zw)) | 0, 0, this.zh - 1);
       this.zellen[zy * this.zb + zx].push(e);
@@ -1204,6 +1532,8 @@ export class Sim {
       case ZUSTAND.angreifen:  this.angreifenTakt(e, w); break;
       case ZUSTAND.heilen:     this.heilenTakt(e, w); break;
       case ZUSTAND.bekehren:   this.bekehrenTakt(e, w); break;
+      case ZUSTAND.einsteigen: this.einsteigenTakt(e, w); break;
+      case ZUSTAND.ausladen:   this.ausladenTakt(e, w); break;
     }
   }
 
@@ -1273,10 +1603,22 @@ export class Sim {
     }
     const qkx = i % this.karte.breite, qky = (i / this.karte.breite) | 0;
     if (!this.anKachel(e, qkx, qky)) {
-      if (this.bewegen(e, w) || ++e.warteRest > 120) { e.warteRest = 0; this.zurQuelle(e, qkx, qky); }
+      if (this.bewegen(e, w) || ++e.warteRest > 120) {
+        e.warteRest = 0;
+        /* Zweimal vergeblich hingesteuert und kein Weg gefunden: die
+           Quelle liegt hinter einer Wand oder in einem anderen See.
+           Dann wird sie gemieden und eine andere gesucht. */
+        if (!e.pfad && ++e.fehlAnlauf >= 2) {
+          e.fehlAnlauf = 0;
+          e.meidetQuelle = i;
+          this.quelleErsetzen(e, w, e.ladungArt);
+          return;
+        }
+        this.zurQuelle(e, qkx, qky);
+      }
       return;
     }
-    e.warteRest = 0;
+    e.warteRest = 0; e.fehlAnlauf = 0; e.meidetQuelle = -1;
     const art = VORKOMMEN_LISTE[this.karte.vorkommen[i] - 1];
     this.ernten(e, w, art, null, i);
   }
@@ -1322,8 +1664,9 @@ export class Sim {
       }
       e.ladung += menge;
     }
-    const grenze = TRAGKRAFT + (p.techs.schubkarre ? TECHS.schubkarre.wirkung.tragkraft : 0)
-                             + (p.techs.handkarre ? TECHS.handkarre.wirkung.tragkraft : 0);
+    const grenze = this.istSchiff(e) ? TRAGKRAFT_BOOT
+      : TRAGKRAFT + (p.techs.schubkarre ? TECHS.schubkarre.wirkung.tragkraft : 0)
+                  + (p.techs.handkarre ? TECHS.handkarre.wirkung.tragkraft : 0);
     if (e.ladung >= grenze) this.zurAbgabe(e, w);
   }
 
@@ -1369,10 +1712,12 @@ export class Sim {
        40 Kacheln ergeben 1,6 Milliarden. Deshalb Infinity als
        Startwert und nirgends 1<<30. */
     let bestes = null, bestD = Infinity;
+    const schiff = this.istSchiff(e);
     for (const b of this.gebaeude) {
       if (b.tot || !b.fertig || b.spieler !== e.spieler) continue;
       const def = GEBAEUDE[b.typ];
       if (!def.abgabe || def.abgabe.indexOf(rohstoff) < 0) continue;
+      if (schiff && !def.amUfer) continue;      // ein Boot faehrt nur den Hafen an
       if (ausser && b.id === ausser) continue;
       const d = abstand2(e.x, e.y, b.x, b.y);
       if (d < bestD) { bestD = d; bestes = b; }
@@ -1386,16 +1731,23 @@ export class Sim {
     if (e.ladung > 0) { this.zurAbgabe(e, w); return; }
     const k = this.karte;
     const sx = this.kx(e), sy = this.ky(e);
+    const schiff = this.istSchiff(e);
+    const fischNr = VORKOMMEN_LISTE.indexOf('fisch') + 1;
     let bestes = -1, bestD = Infinity;
-    const R = 14;
+    /* Boote suchen weiter — Fischgruende liegen selten vor der Tuer. */
+    const R = schiff ? 40 : 14;
     for (let y = Math.max(0, sy - R); y <= Math.min(k.hoehe - 1, sy + R); y++) {
       for (let x = Math.max(0, sx - R); x <= Math.min(k.breite - 1, sx + R); x++) {
         const i = y * k.breite + x;
         const v = k.vorkommen[i];
         if (!v || k.menge[i] <= 0) continue;
+        if (schiff !== (v === fischNr)) continue;
         if (VORKOMMEN[VORKOMMEN_LISTE[v - 1]].rohstoff !== rohstoff) continue;
+        if (i === e.meidetQuelle) continue;
         const d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
-        if (d < bestD) { bestD = d; bestes = i; }
+        if (d >= bestD) continue;
+        if (schiff && !this.wasserErreichbar(e, x, y)) continue;
+        bestD = d; bestes = i;
       }
     }
     if (bestes >= 0) {
@@ -1507,6 +1859,15 @@ export class Sim {
   }
 
   /** Sucht das lohnendste Ziel im Umkreis. */
+  /** Kann diese Einheit jenes Ziel ueberhaupt treffen? */
+  erreichbaresZiel(e, w, ziel) {
+    if (ziel.art === 'gebaeude') return !this.istSchiff(e) || w.fern;
+    const anderesElement = this.istSchiff(e) !== this.istSchiff(ziel);
+    /* Wer im Nahkampf steht, kommt nicht ans andere Element heran —
+       ein Ritter erreicht keine Galeere und umgekehrt. */
+    return !anderesElement || w.fern;
+  }
+
   zielSuchen(e, w, rFP) {
     /* Erst der Rang (Soldat vor Dorfbewohner vor Gebaeude), bei
        gleichem Rang der Abstand. Getrennt vergleichen statt in eine
@@ -1514,7 +1875,9 @@ export class Sim {
     let bestes = null, bestRang = 99, bestD = Infinity;
     this.imUmkreis(e.x, e.y, rFP, (o) => {
       if (o === e || this.verbuendet(e.spieler, o.spieler)) return;
+      if (o.art === 'einheit' && o.verladen) return;
       if (o.art === 'gebaeude' && !o.fertig && o.hp <= 1) return;
+      if (!this.erreichbaresZiel(e, w, o)) return;
       const d2 = abstand2(e.x, e.y, o.x, o.y);
       if (d2 > rFP * rFP) return;
       /* Soldaten zuerst, dann Dorfbewohner, dann Gebaeude. */
@@ -1591,6 +1954,96 @@ export class Sim {
       }
     }
     this.geschosse = bleiben;
+  }
+
+  /* ── Fracht ── */
+
+  einsteigenTakt(e, w) {
+    const schiff = this.nachId.get(e.zielId);
+    if (!schiff || schiff.tot) { this.befehlFertig(e); return; }
+    const plaetze = (EINHEITEN[schiff.typ] && EINHEITEN[schiff.typ].plaetze) || 0;
+    if (schiff.fracht.length >= plaetze) { this.hinweisVoll(e, schiff); return; }
+    const d2 = abstand2(e.x, e.y, schiff.x, schiff.y);
+    if (d2 > (2 * FP) * (2 * FP)) {
+      /* Bis ans Ufer laufen — das Schiff selbst steht im Wasser. */
+      if (!e.pfad || (this.takt % 15) === (e.id % 15)) {
+        const feld = this.nachbarKachel(e, this.kx(schiff), this.ky(schiff));
+        if (feld) this.wegSuchen(e, feld[0] * FP + FP / 2, feld[1] * FP + FP / 2, 0);
+        else this.wegSuchen(e, schiff.x, schiff.y, 1);
+      }
+      if (!e.wartetAufWeg || e.pfad) this.bewegen(e, w);
+      if (++e.warteRest > 400) { e.warteRest = 0; this.befehlFertig(e); }
+      return;
+    }
+    /* An Bord. */
+    e.verladen = schiff.id;
+    e.warteRest = 0;
+    schiff.fracht.push(e.id);
+    this.befehlSetzen(e, null);
+    this.ereignisse.push({ art: 'eingestiegen', spieler: e.spieler, id: e.id, x: schiff.x, y: schiff.y });
+  }
+
+  hinweisVoll(e, schiff) {
+    if (this.takt % 20 === 0) this.ereignisse.push({ art: 'meldung', spieler: e.spieler, text: 'Das Schiff ist voll.' });
+    this.befehlFertig(e);
+  }
+
+  /** Wasserfeld, von dem aus sich beim Zielpunkt anlanden laesst.
+      Gesucht wird im eigenen Gewaesser und mit Land daneben. */
+  anlegeplatz(schiff, kx, ky) {
+    const k = this.karte;
+    const revier = this.revierVon(schiff);
+    if (revier < 0) return null;
+    let bestes = null, bestD = Infinity;
+    for (let r = 0; r <= 8 && !bestes; r++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = kx + dx, y = ky + dy;
+        if (!drin(k, x, y)) continue;
+        const i = y * k.breite + x;
+        if (this.sperreWasser[i] === GESPERRT || this.wasserRevier[i] !== revier) continue;
+        /* Nur wo auch jemand von Bord gehen kann. */
+        let land = false;
+        for (let ay = -1; ay <= 1 && !land; ay++) for (let ax = -1; ax <= 1; ax++) {
+          if (!drin(k, x + ax, y + ay)) continue;
+          if (this.sperre[(y + ay) * k.breite + x + ax] !== GESPERRT) { land = true; break; }
+        }
+        if (!land) continue;
+        const d = (dx * dx + dy * dy);
+        if (d < bestD) { bestD = d; bestes = [x, y]; }
+      }
+    }
+    return bestes;
+  }
+
+  ausladenTakt(e, w) {
+    const zielX = e.befehl.x, zielY = e.befehl.y;
+    const kx = (zielX / FP) | 0, ky = (zielY / FP) | 0;
+    /* Der Anlegeplatz wird einmal bestimmt und dann angesteuert —
+       sonst sucht das Schiff bei jedem Takt ein anderes Ufer. */
+    if (!e.befehl.ax) {
+      const platz = this.anlegeplatz(e, kx, ky);
+      if (!platz) {
+        this.ereignisse.push({ art: 'meldung', spieler: e.spieler, text: 'Dorthin fuehrt kein Wasserweg.' });
+        this.befehlFertig(e);
+        return;
+      }
+      e.befehl.ax = platz[0] * FP + FP / 2;
+      e.befehl.ay = platz[1] * FP + FP / 2;
+    }
+    if (!this.anKachel(e, (e.befehl.ax / FP) | 0, (e.befehl.ay / FP) | 0)) {
+      if (!e.pfad && !e.wartetAufWeg) this.wegSuchen(e, e.befehl.ax, e.befehl.ay, 0);
+      if (!e.wartetAufWeg || e.pfad) this.bewegen(e, w);
+      if (++e.warteRest > 600) { e.warteRest = 0; this.befehlFertig(e); }
+      return;
+    }
+    e.warteRest = 0;
+    if (!this.ausladenVersuchen(e)) {
+      this.ereignisse.push({ art: 'meldung', spieler: e.spieler, text: 'Hier ist kein Platz zum Anlanden.' });
+      this.befehlFertig(e);
+      return;
+    }
+    if (!e.fracht.length) this.befehlFertig(e);
   }
 
   /* ── Moenche ── */
@@ -1751,6 +2204,23 @@ export class Sim {
   /** Frische Einheit neben dem Gebaeude absetzen. */
   einheitAusstossen(b, typ) {
     const g = b.groesse;
+    /* Schiffe brauchen Wasser: im Umkreis des Hafens die naechste
+       freie Wasserkachel suchen. */
+    if (EINHEITEN[typ] && EINHEITEN[typ].wasser) {
+      let platz = null, bestD = Infinity;
+      for (let y = b.ky - 4; y <= b.ky + g + 3; y++) {
+        for (let x = b.kx - 4; x <= b.kx + g + 3; x++) {
+          if (!drin(this.karte, x, y)) continue;
+          if (this.sperreWasser[y * this.karte.breite + x] === GESPERRT) continue;
+          const d = abstand2(x, y, b.kx + g / 2, b.ky + g / 2);
+          if (d < bestD) { bestD = d; platz = [x, y]; }
+        }
+      }
+      if (!platz) { this.ereignisse.push({ art: 'meldung', spieler: b.spieler, text: 'Kein Wasser frei — das Schiff kann nicht ablegen.' }); return; }
+      const s = this.einheitSetzen(b.spieler, typ, platz[0] * FP + FP / 2, platz[1] * FP + FP / 2);
+      if (s) this.ereignisse.push({ art: 'einheitFertig', spieler: b.spieler, typ, id: s.id, x: s.x, y: s.y });
+      return;
+    }
     /* Feste Reihenfolge: unten, rechts, oben, links — aussen herum. */
     const stellen = [];
     for (let x = b.kx - 1; x <= b.kx + g; x++) { stellen.push([x, b.ky + g]); }
@@ -1815,7 +2285,7 @@ export class Sim {
       }
     };
     for (const e of this.einheiten) {
-      if (e.tot) continue;
+      if (e.tot || e.verladen) continue;
       const w = this.werte(e.spieler, e.typ);
       stempeln(e.spieler, this.kx(e), this.ky(e), w.sicht);
     }
@@ -1906,7 +2376,7 @@ export class Sim {
   zaehlen(spielerId) {
     const raus = { gesamt: 0, dorf: 0, militaer: 0, untaetig: 0, typen: {} };
     for (const e of this.einheiten) {
-      if (e.tot || e.spieler !== spielerId) continue;
+      if (e.tot || e.spieler !== spielerId || e.verladen) continue;
       raus.gesamt++;
       raus.typen[e.typ] = (raus.typen[e.typ] || 0) + 1;
       const w = this.werte(spielerId, e.typ);

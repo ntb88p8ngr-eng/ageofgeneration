@@ -375,6 +375,19 @@ export function landModell(art) {
       break;
     }
 
+    /* ── Fisch ──
+       Liegt im Wasser: ein Schwarm dicht unter der Oberflaeche, dazu
+       ein paar Ringe. Mehr braucht es nicht, um erkennbar zu sein. */
+    case 'fisch': {
+      for (const [dx, dz, dreh, gross] of [[0, 0, 0.3, 1], [0.22, 0.18, -0.5, 0.8], [-0.2, 0.15, 0.9, 0.7], [0.05, -0.24, 1.6, 0.75]]) {
+        const l = 0.2 * gross;
+        b.kugel(dx, 0.06, dz, l * 0.5, 0x4a7f9c, 6);
+        b.kegel(dx - Math.cos(dreh) * l, 0.06, dz - Math.sin(dreh) * l, l * 0.45, l * 0.9, 4, 0x3d6d88, Math.PI / 2, dreh);
+        b.kasten(dx, 0.12, dz, l * 0.5, l * 0.35, 0.02, 0x5a90ab, dreh);
+      }
+      break;
+    }
+
     /* ── Tiere ── */
     case 'schaf': {
       b.kugel(0, 0.24, 0, 0.2, 0xefe9dd, 8);
@@ -878,6 +891,98 @@ export function gebaeudeModell(typ, volk) {
       break;
     }
 
+    /* ─────────────── Bruecke ───────────────
+       Liegt auf dem Wasser, ein Feld breit: Joche, Bohlen, Gelaender.
+       Der Nullpunkt liegt auf Hoehe des Wasserspiegels. */
+    case 'bruecke': {
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          b.zylinder(sx * 0.34, 0.02, sz * 0.34, 0.06, 0.07, 0.5, 6, FARBE.holzDunkel);
+        }
+      }
+      b.kasten(0, 0.28, 0, 1.04, 0.07, 0.86, FARBE.holz);
+      for (let i = 0; i < 5; i++) {
+        b.kasten(-0.4 + i * 0.2, 0.33, 0, 0.13, 0.04, 0.86, FARBE.holzHell);
+      }
+      for (const sz of [-1, 1]) {
+        b.kasten(0, 0.52, sz * 0.44, 1.04, 0.05, 0.05, FARBE.holzHell);
+        for (const sx of [-1, 0, 1]) b.kasten(sx * 0.42, 0.42, sz * 0.44, 0.06, 0.24, 0.06, FARBE.holzDunkel);
+      }
+      break;
+    }
+
+    /* ─────────────── Hafen ───────────────
+       Das Bootshaus steht mit dem Ruecken zum Land (-z), davor liegt
+       eine Kaimauer und ein Steg, der auf Pfaehlen ins Wasser (+z)
+       hinauslaeuft. Die Simulation dreht das Ganze so, dass der Steg
+       zum Wasser zeigt; darum ist das Modell nicht symmetrisch. */
+    case 'hafen': {
+      const halb = g / 2;                       // 1,5 Kacheln
+
+      /* Kaimauer aus Bruchstein am Uebergang zum Wasser. */
+      b.kasten(0, 0.12, 0.15, g - 0.2, 0.24, 0.5, FARBE.steinDunkel);
+      for (let i = 0; i < 5; i++) {
+        b.kasten(-1.1 + i * 0.55, 0.26, 0.15, 0.42, 0.08, 0.54, FARBE.stein);
+      }
+
+      /* Bootshaus: Bruchsteinsockel, verputzte Wand, Fachwerk, Satteldach. */
+      b.kasten(-0.35, 0.1, -0.85, 1.7, 0.2, 1.15, FARBE.steinDunkel);
+      b.kasten(-0.35, 0.62, -0.85, 1.62, 0.84, 1.05, FARBE.putz);
+      b.fachwerk(-0.35, 0.62, -0.85 + 0.53, 1.62, 0.84, 1.05, 'z');
+      b.giebel(-0.35, 1.04, -0.85, 1.72, 1.15, 0.62, FARBE.schindel, true);
+      b.tuer(-0.35, 0.2, -0.85 + 0.53, 0.5, 0.62, 'z');
+      b.fenster(-1.0, 0.78, -0.85 + 0.53, 0.22, 0.24, 'z');
+      b.fenster(0.3, 0.78, -0.85 + 0.53, 0.22, 0.24, 'z');
+      /* Schornstein und Wetterfahne */
+      b.kasten(0.35, 1.5, -1.15, 0.16, 0.5, 0.16, FARBE.ziegel);
+      b.zylinder(-0.35, 1.68, -0.85, 0.02, 0.02, 0.3, 4, FARBE.eisen);
+
+      /* Kai davor: Bohlen quer, danach der Steg ins Wasser. */
+      b.kasten(0, 0.3, 0.05, g - 0.3, 0.06, 0.7, FARBE.holz);
+      for (let i = 0; i < 7; i++) {
+        b.kasten(-1.2 + i * 0.4, 0.34, 0.05, 0.3, 0.03, 0.7, FARBE.holzHell);
+      }
+      /* Steg: schmaler Laufsteg, der ueber die Baugrenze hinausragt. */
+      b.kasten(0.35, 0.3, halb + 0.35, 0.75, 0.06, 1.5, FARBE.holz);
+      for (let i = 0; i < 6; i++) {
+        b.kasten(0.35, 0.34, halb - 0.3 + i * 0.26, 0.75, 0.03, 0.2, FARBE.holzHell);
+      }
+      /* Pfaehle unter Kai und Steg, bis unter den Wasserspiegel. */
+      for (const [px, pz] of [[-1.2, 0.35], [-0.4, 0.35], [0.4, 0.35], [1.2, 0.35],
+                              [0.05, halb + 0.2], [0.65, halb + 0.2],
+                              [0.05, halb + 1.0], [0.65, halb + 1.0]]) {
+        b.zylinder(px, -0.05, pz, 0.06, 0.07, 0.75, 6, FARBE.holzDunkel);
+      }
+      /* Poller mit Tau */
+      for (const px of [-1.25, 1.25]) {
+        b.zylinder(px, 0.42, 0.35, 0.07, 0.08, 0.24, 6, FARBE.holzDunkel);
+        b.kugel(px, 0.55, 0.35, 0.07, FARBE.holz, 6);
+      }
+
+      /* Ladekran am Kai: Mast, Ausleger, Seil, Haken. */
+      b.zylinder(-1.35, 0.75, 0.25, 0.08, 0.1, 0.9, 7, FARBE.holz);
+      b.kasten(-1.35, 1.2, 0.25, 0.09, 0.09, 0.09, FARBE.eisen);
+      b.kasten(-1.05, 1.16, 0.25, 0.7, 0.08, 0.08, FARBE.holz, 0, 0, 0.25);
+      b.zylinder(-0.75, 0.95, 0.25, 0.012, 0.012, 0.42, 4, FARBE.eisen);
+      b.kasten(-0.75, 0.72, 0.25, 0.18, 0.14, 0.18, FARBE.holzDunkel);
+
+      /* Fischerkram: Kisten, Faesser, Netz, Ruder, Bojen. */
+      b.kasten(0.95, 0.42, -0.15, 0.3, 0.18, 0.24, FARBE.holzHell);
+      b.kasten(0.95, 0.6, -0.15, 0.26, 0.16, 0.2, FARBE.holzHell);
+      b.kasten(1.25, 0.42, 0.15, 0.26, 0.18, 0.22, FARBE.holz);
+      b.fass(-0.95, 0.44, -0.1, 0.13, 0.28);
+      b.fass(-0.7, 0.38, 0.05, 0.12, 0.26, true);
+      b.halbkugel(-1.3, 0.35, -0.25, 0.2, 0x8a8f6a, 7);
+      b.kasten(1.15, 0.62, -0.35, 0.05, 0.05, 0.9, FARBE.holzHell, 0, 0.4, 0);
+      for (const [bx, bz] of [[-0.15, halb + 1.2], [0.85, halb + 0.9]]) {
+        b.kugel(bx, 0.06, bz, 0.09, FARBE.ziegel, 6);
+      }
+
+      /* Wimpel am Giebel — der Hafen gehoert sichtbar jemandem. */
+      b.wimpel(-1.35, 0.3, -1.3, 0.95);
+      break;
+    }
+
     /* ─────────────── Tor ─────────────── */
     case 'tor': {
       for (const sx of [-1, 1]) {
@@ -992,6 +1097,38 @@ function pferd(b, farbe) {
   b.kasten(0, 0.5, 0, 0.34, 0.05, 0.28, null);
   b.kasten(0.02, 0.54, 0, 0.2, 0.06, 0.22, FARBE.leder);
   b.kasten(0.14, 0.52, 0, 0.05, 0.09, 0.2, FARBE.leder);
+}
+
+/**
+ * Schiffsrumpf in Klinkerbauweise: Kiel, drei Plankengaenge je Seite,
+ * die nach oben ausstellen, Vordersteven, Heckspiegel und ein
+ * Seitenruder. Alle Masse in Kacheln; das Boot zeigt nach +x.
+ */
+function rumpf(b, laenge, breite, farbe, dunkel) {
+  const rand = dunkel || FARBE.holzDunkel;
+  /* Kiel und Boden */
+  b.kasten(0, 0.05, 0, laenge * 0.94, 0.08, breite * 0.82, farbe);
+  b.kasten(0, -0.01, 0, laenge, 0.05, breite * 0.3, rand);
+  /* Plankengaenge: jeder liegt etwas hoeher und weiter aussen. */
+  for (let i = 0; i < 3; i++) {
+    const y = 0.11 + i * 0.07;
+    const w = breite * (0.84 + i * 0.09);
+    const l = laenge * (0.94 - i * 0.03);
+    for (const sz of [-1, 1]) {
+      b.kasten(0, y, sz * w / 2, l, 0.075, 0.045, i === 2 ? rand : farbe);
+    }
+  }
+  /* Spanten innen */
+  for (let i = -1; i <= 1; i++) {
+    b.kasten(i * laenge * 0.26, 0.16, 0, 0.05, 0.16, breite * 0.86, rand);
+  }
+  /* Vordersteven: ansteigender Keil statt stumpfer Nase. */
+  b.kegel(laenge / 2 - 0.02, 0.1, 0, breite * 0.42, laenge * 0.26, 4, farbe, 0, -Math.PI / 2);
+  b.kasten(laenge / 2 - 0.03, 0.24, 0, 0.07, 0.26, 0.06, rand, 0, 0, -0.35);
+  /* Heckspiegel mit Ruderpinne */
+  b.kasten(-laenge / 2 + 0.05, 0.18, 0, 0.07, 0.26, breite * 0.86, farbe);
+  b.kasten(-laenge / 2 + 0.02, 0.06, breite * 0.44, 0.05, 0.22, 0.03, rand, 0, 0, 0.3);
+  b.kasten(-laenge / 2 + 0.08, 0.3, breite * 0.4, 0.16, 0.03, 0.03, FARBE.holzHell);
 }
 
 export function einheitModell(typ) {
@@ -1188,6 +1325,85 @@ export function einheitModell(typ) {
       for (const s of [-1, 1]) b.kasten(s * 0.45, 0.2, 0, 0.08, 0.2, 0.7, FARBE.holzDunkel);
       for (let i = 0; i < 4; i++) b.kasten(-0.4, 0.3 + i * 0.2, 0.42, 0.22, 0.03, 0.03, FARBE.holz);
       b.kasten(0, 0.2, 0, 0.4, 0.1, 0.5, null);
+      break;
+    }
+
+    /* ── Schiffe ──
+       Rumpf aus zwei Haelften, Bordwand, Steven — dazu, was das
+       Schiff ausmacht: Netz, Ladung oder Segel. */
+    /* ── Fischerboot: kleiner Kahn mit Netz, Reusen und Fang ── */
+    case 'fischerboot': {
+      rumpf(b, 0.9, 0.34, FARBE.holz);
+      /* Ducht (Sitzbank) und Bodenbretter */
+      b.kasten(0.02, 0.17, 0, 0.52, 0.04, 0.26, FARBE.holzHell);
+      b.kasten(0.16, 0.26, 0, 0.06, 0.05, 0.3, FARBE.holzHell);
+      /* Kurzer Mast mit Luggersegel */
+      b.zylinder(-0.02, 0.42, 0, 0.018, 0.024, 0.56, 5, FARBE.holzDunkel);
+      b.kasten(-0.02, 0.62, 0, 0.02, 0.02, 0.3, FARBE.holzDunkel, 0, 0, 0.2);
+      b.kasten(-0.02, 0.46, 0.09, 0.015, 0.3, 0.24, FARBE.stoff);
+      /* Wimpel in Spielerfarbe — daran erkennt man den Besitzer. */
+      b.kasten(-0.02, 0.68, -0.06, 0.012, 0.06, 0.12, null);
+      /* Netz ueber dem Heck, Schwimmer daran */
+      b.halbkugel(-0.3, 0.2, 0, 0.13, 0x8a8f6a, 7);
+      for (const sz of [-1, 1]) b.kugel(-0.34, 0.28, sz * 0.1, 0.035, FARBE.ziegel, 5);
+      /* Reuse und Fangkiste am Bug */
+      b.zylinder(0.3, 0.24, 0.08, 0.06, 0.07, 0.16, 6, 0x8a8f6a, Math.PI / 2);
+      b.kasten(0.3, 0.24, -0.07, 0.16, 0.12, 0.13, FARBE.holzHell);
+      /* Zwei Ruder laengs an Bord */
+      for (const sz of [-1, 1]) {
+        b.zylinder(-0.05, 0.29, sz * 0.14, 0.012, 0.012, 0.5, 4, FARBE.holzHell, 0, 0, Math.PI / 2);
+      }
+      break;
+    }
+    /* ── Transporter: breiter Prahm mit Rahsegel und Ladung ── */
+    case 'transporter': {
+      rumpf(b, 1.1, 0.46, FARBE.holz);
+      b.kasten(0, 0.2, 0, 0.84, 0.05, 0.4, FARBE.holzHell);
+      /* Ladung: Kisten, Faesser, Heuballen */
+      b.kasten(-0.18, 0.33, -0.06, 0.24, 0.2, 0.22, FARBE.holzDunkel);
+      b.kasten(-0.2, 0.51, -0.06, 0.2, 0.16, 0.18, FARBE.holzHell);
+      b.kasten(0.16, 0.31, 0.1, 0.2, 0.16, 0.18, FARBE.holzDunkel);
+      b.fass(0.14, 0.28, -0.12, 0.09, 0.2);
+      b.fass(-0.02, 0.24, 0.14, 0.08, 0.18, true);
+      /* Mast mit Rahsegel in Spielerfarbe, Wanten nach achtern */
+      b.zylinder(0.04, 0.56, 0, 0.026, 0.032, 0.74, 6, FARBE.holzDunkel);
+      b.kasten(0.04, 0.86, 0, 0.03, 0.03, 0.46, FARBE.holzDunkel);
+      b.kasten(0.04, 0.68, 0, 0.02, 0.34, 0.42, null);
+      for (const sz of [-1, 1]) {
+        b.zylinder(-0.16, 0.5, sz * 0.12, 0.008, 0.008, 0.78, 4, FARBE.leder, sz * 0.28, 0, 0.42);
+      }
+      /* Landungssteg am Bug, den man herunterlaesst */
+      b.kasten(0.5, 0.24, 0, 0.3, 0.04, 0.26, FARBE.holzHell, 0, 0, -0.28);
+      break;
+    }
+    /* ── Galeere: Kriegsschiff mit Ruderbank und Rammsporn ── */
+    case 'galeere': {
+      rumpf(b, 1.25, 0.4, FARBE.holzDunkel, 0x33220f);
+      b.kasten(0, 0.22, 0, 0.94, 0.05, 0.32, FARBE.holz);
+      /* Ruderbaenke und Riemen an beiden Seiten */
+      for (let i = 0; i < 5; i++) {
+        const x = -0.38 + i * 0.19;
+        b.kasten(x, 0.27, 0, 0.05, 0.05, 0.3, FARBE.holzHell);
+        for (const sz of [-1, 1]) {
+          b.zylinder(x - 0.06, 0.14, sz * 0.28, 0.014, 0.014, 0.36, 4, FARBE.holzHell, sz * 0.85, 0);
+        }
+      }
+      /* Mast mit Segel in Spielerfarbe, Ausguck oben */
+      b.zylinder(-0.08, 0.6, 0, 0.028, 0.035, 0.8, 6, FARBE.holzDunkel);
+      b.kasten(-0.08, 0.92, 0, 0.03, 0.03, 0.48, FARBE.holzDunkel);
+      b.kasten(-0.08, 0.72, 0, 0.02, 0.36, 0.44, null);
+      b.zylinder(-0.08, 1.02, 0, 0.09, 0.08, 0.12, 7, FARBE.holz);
+      /* Rammsporn mit Eisenbeschlag */
+      b.kegel(0.72, 0.1, 0, 0.07, 0.26, 5, FARBE.eisen, 0, -Math.PI / 2);
+      b.kasten(0.58, 0.14, 0, 0.12, 0.05, 0.1, FARBE.eisen);
+      /* Schuetzenstand vorn, Schilde laengs der Bordwand */
+      b.kasten(0.42, 0.33, 0, 0.22, 0.16, 0.24, FARBE.holz);
+      b.zinnen(0.42, 0.41, 0, 0.24, 0.26, FARBE.holzHell, 2);
+      for (let i = 0; i < 4; i++) {
+        for (const sz of [-1, 1]) {
+          b.zylinder(-0.3 + i * 0.2, 0.32, sz * 0.21, 0.06, 0.06, 0.02, 7, null, 0, Math.PI / 2);
+        }
+      }
       break;
     }
 
