@@ -800,6 +800,18 @@ const Spiel = {
         case 'quelleLeer':
           this.welt.landDreckig = true;
           break;
+        case 'eingestiegen':
+          if (e.spieler === meiner) this.klang('befehl');
+          break;
+        case 'ausgeladen':
+          if (e.spieler === meiner) {
+            this.hinweis(e.zahl === 1 ? 'Eine Einheit ist an Land' : e.zahl + ' Einheiten sind an Land');
+            this.klang('befehl');
+          }
+          break;
+        case 'gerettet':
+          if (e.spieler === meiner) this.hud.meldung('Die Bruecke ist weg — deine Leute stehen am Ufer', 'warnung');
+          break;
         case 'farmLeer':
           if (e.spieler === meiner) this.hud.meldung('Eine Farm ist abgeerntet');
           break;

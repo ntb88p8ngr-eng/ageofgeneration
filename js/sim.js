@@ -43,6 +43,9 @@ const SIEG_TAKT = 20;
 const PFADE_PRO_TAKT = 20;
 /* So weit verfolgt eine Einheit ein selbst gewaehltes Ziel (in Fixpunkt). */
 const VERFOLGUNG = 12 * FP;
+/* So viele Takte wartet eine Einheit auf einen Weg zu ihrem Angriffsziel,
+   bevor sie die Jagd aufgibt. */
+const JAGD_GEDULD = 150;
 
 export class Sim {
   /**
@@ -415,7 +418,8 @@ export class Sim {
       zielId: 0, angriffRest: 0, ladung: 0, ladungArt: null, sammelRest: 0,
       quelleI: -1, abgabeId: 0, bauId: 0, bekehrRest: 0, ruheRest: 0,
       steckRest: 0, warteRest: 0, bauVersuche: 0, abgabeVersuche: 0, letzteArbeit: null,
-      verladen: 0, fracht: [], meidetQuelle: -1, fehlAnlauf: 0, tot: false, neu: true
+      verladen: 0, fracht: [], meidetQuelle: -1, fehlAnlauf: 0, hetztVon: null, jagdRest: 0,
+      tot: false, neu: true
     };
     this.einheiten.push(e);
     this.nachId.set(e.id, e);
@@ -439,6 +443,11 @@ export class Sim {
       const i = ky * k.breite + kx;
       if (k.boden[i] !== BODEN.wasser || this.belegt[i] || k.vorkommen[i]) return false;
       if (!ignoriereSicht && !this.spieler[spielerId].erkundet[i]) return false;
+      /* Nicht ueber ein Schiff bauen — das saesse danach fest. */
+      for (const e of this.einheiten) {
+        if (e.tot || e.verladen || !this.istSchiff(e)) continue;
+        if (this.kx(e) === kx && this.ky(e) === ky) return false;
+      }
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const x = kx + dx, y = ky + dy;
         if (!drin(k, x, y)) continue;
@@ -681,7 +690,39 @@ export class Sim {
       const i = y * this.karte.breite + x;
       if (this.belegt[i] === b.id) { this.belegt[i] = 0; this.sperreSetzen(x, y); }
     }
+    /* Faellt eine Bruecke, steht das Fussvolk darauf ploetzlich im
+       Wasser — und koennte sich nie wieder ruehren. Wer noch ans Ufer
+       springen kann, tut das; fuer den Rest ist die Fahrt zu Ende. */
+    if (GEBAEUDE[b.typ].aufWasser && GEBAEUDE[b.typ].begehbar) this.vonBordSpuelen(b);
     this.ereignisse.push({ art: 'gebaeudeWeg', id: b.id, spieler: b.spieler, typ: b.typ, x: b.x, y: b.y });
+  }
+
+  /** Setzt Landvolk von einer verschwundenen Bruecke ans Ufer — oder
+      laesst es ertrinken, wenn kein Ufer in Reichweite liegt. */
+  vonBordSpuelen(b) {
+    const k = this.karte;
+    for (const e of this.einheiten) {
+      if (e.tot || e.verladen || this.istSchiff(e)) continue;
+      const kx = this.kx(e), ky = this.ky(e);
+      if (kx < b.kx || kx >= b.kx + b.groesse || ky < b.ky || ky >= b.ky + b.groesse) continue;
+      let ufer = null, bestD = Infinity;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const x = kx + dx, y = ky + dy;
+        if (!drin(k, x, y)) continue;
+        if (this.sperre[y * k.breite + x] === GESPERRT) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; ufer = [x, y]; }
+      }
+      if (ufer) {
+        e.x = ufer[0] * FP + FP / 2; e.y = ufer[1] * FP + FP / 2;
+        e.altX = e.x; e.altY = e.y;
+        e.pfad = null; e.pfadI = 0;
+        this.befehlSetzen(e, null);
+        this.ereignisse.push({ art: 'gerettet', spieler: e.spieler, id: e.id, x: e.x, y: e.y });
+      } else {
+        this.einheitTot(e, null);
+      }
+    }
   }
 
   /* ─────────────── Rohstoffe ─────────────── */
@@ -1047,8 +1088,12 @@ export class Sim {
   cmdAusladen(p, c) {
     for (const schiff of this.meineEinheiten(p, c.ids)) {
       if (!schiff.fracht || !schiff.fracht.length) continue;
-      /* x/y kommen wie bei „gehen“ in Fixpunkt herein. */
-      this.befehlSetzen(schiff, { art: 'ausladen', x: c.x | 0, y: c.y | 0 });
+      /* x/y kommen wie bei „gehen“ in Fixpunkt herein. Fehlen sie,
+         heisst der Befehl „hier an Land“ — das Schiff sucht sich das
+         naechste Ufer selbst. */
+      const x = c.x == null ? schiff.x : c.x | 0;
+      const y = c.y == null ? schiff.y : c.y | 0;
+      this.befehlSetzen(schiff, { art: 'ausladen', x, y });
     }
   }
 
@@ -1136,6 +1181,12 @@ export class Sim {
         const z = this.nachId.get(b.ziel);
         if (!z || z.tot) { this.befehlSetzen(e, null); return; }
         e.zielId = z.id; e.zustand = ZUSTAND.angreifen;
+        /* Wer eigentlich zum Arbeiten da ist, bekommt eine Leine: von
+           hier aus geht es nur ein Stueck weit hinterher. Ein Spaeher,
+           der ums Dorf kreist, hat sonst schon ganze Wirtschaften zum
+           Erliegen gebracht — die Dorfbewohner rennen ihm bis ans
+           Kartenende nach und ernten nie wieder. */
+        e.hetztVon = this.werte(e.spieler, e.typ).kannSammeln ? { x: e.x, y: e.y } : null;
         break;
       }
       case 'sammeln':
@@ -1825,6 +1876,14 @@ export class Sim {
       this.befehlSetzen(e, { art: 'gehen', x: wache.x, y: wache.y });
       return;
     }
+    /* Dasselbe fuer befohlene Angriffe von Sammlern: Reisst die Leine,
+       geht es zurueck an die Arbeit statt weiter hinterher. */
+    if (e.hetztVon && abstand2(e.x, e.y, e.hetztVon.x, e.hetztVon.y) > VERFOLGUNG * VERFOLGUNG) {
+      const heim = e.hetztVon; e.hetztVon = null;
+      const arbeit = e.letzteArbeit;
+      this.befehlSetzen(e, arbeit || { art: 'gehen', x: heim.x, y: heim.y });
+      return;
+    }
 
     const reich = w.reichweiteFP + (ziel.art === 'gebaeude' ? Math.round(ziel.groesse * FP / 2) : Math.round(FP * 0.3));
     const d2 = abstand2(e.x, e.y, ziel.x, ziel.y);
@@ -1838,8 +1897,19 @@ export class Sim {
         }
       }
       if (!e.wartetAufWeg || e.pfad) this.bewegen(e, w);
+      /* Kommt gar kein Weg zustande, wird die Jagd abgeblasen. Sonst
+         steht die Einheit bis zum Abpfiff da und bestellt jeden Takt
+         eine neue Suche — das kostet Rechenzeit und legt bei einem
+         Dorfbewohner die ganze Wirtschaft still. Die Leine oben greift
+         hier nicht: wer sich nie bewegt, entfernt sich auch nie. */
+      if (e.pfad) e.jagdRest = 0;
+      else if (++e.jagdRest > JAGD_GEDULD) {
+        e.jagdRest = 0; e.hetztVon = null;
+        this.befehlSetzen(e, e.letzteArbeit || null);
+      }
       return;
     }
+    e.jagdRest = 0;
     e.richtung = richtungAus(ziel.x - e.x, ziel.y - e.y);
     if (e.angriffRest > 0) return;
     e.angriffRest = w.angriffTakte;

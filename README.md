@@ -67,6 +67,9 @@ Wie im Vorbild, erweitert um die freie Kamera.
 | Fischschwarm (mit Fischerboot) | fischen |
 | eigener Transporter | an Bord gehen |
 | Land (mit beladenem Transporter) | anlanden |
+
+Ein beladener Transporter hat ausserdem den Knopf **Von Bord** (`X`): er
+sucht sich das naechste Ufer selbst.
 | eigene Baustelle | mitbauen |
 | beschaedigtes Gebaeude | reparieren |
 | Farm | bestellen |
@@ -114,6 +117,27 @@ js/
   spiel.js     haelt alles zusammen
 test/          node --test test/*.test.js
 ```
+
+### Warum Einheiten eine Leine haben
+
+Ein feindlicher Spaeher, der ums Dorf kreist, hat in einem Dauerlauf eine
+komplette Wirtschaft zum Erliegen gebracht: Die KI rief ihre Dorfbewohner
+zu den Waffen, die rannten hinterher — und weil der Spaeher jenseits eines
+Sees stand, kam nie ein Weg zustande. Sie warteten bis zum Abpfiff und
+ernteten nie wieder; nebenbei bestellten sie jeden Takt eine neue Wegsuche
+und machten die Partie fuenfmal langsamer.
+
+Dagegen helfen drei Riegel, die zusammengehoeren:
+
+1. Wer sammeln kann und zum Angriff geschickt wird, merkt sich, wo er
+   losgelaufen ist. Zwoelf Kacheln weiter ist Schluss — dann geht es
+   zurueck an die letzte Arbeit.
+2. Kommt ueberhaupt kein Weg zustande, wird die Jagd nach hundertfuenfzig
+   Takten abgeblasen. Die Leine allein genuegt nicht: Wer sich nie bewegt,
+   entfernt sich auch nie.
+3. Die KI ruft ihre Dorfbewohner hoechstens alle neunhundert Takte zu den
+   Waffen und schickt sie zurueck an die Arbeit, sobald der Feind nicht
+   mehr unmittelbar vor dem Zentrum steht.
 
 ### Warum die Simulation nur ganze Zahlen kennt
 
@@ -181,6 +205,12 @@ werden darum trockengelegt, und Fisch kommt nur in Wasser, das mindestens
 zwanzig Felder gross ist. Die Kartenart „Kueste“ zieht zusaetzlich einen breiten
 Meerarm quer ueber die Karte — als Irrfahrt von Rand zu Rand, ohne
 Winkelfunktionen, damit jeder Rechner dieselbe Kuestenlinie erhaelt.
+
+Zwei Wege fuehren in eine Sackgasse, wenn man sie nicht abfaengt. Faellt
+eine **Bruecke**, waehrend Fussvolk darauf steht, stuende es ploetzlich im
+Wasser — mit einem Weg, den es nie gehen kann. Wer noch ans Ufer springt,
+tut das; fuer den Rest ist die Fahrt zu Ende. Umgekehrt darf keine Bruecke
+ueber einem **Schiff** entstehen, das saesse danach ebenso fest.
 
 ### Warum beim Bauen der Boden eingeebnet wird
 

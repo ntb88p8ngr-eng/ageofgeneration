@@ -681,3 +681,113 @@ test('Neun Spieler bekommen erreichbare Startplaetze', () => {
     assert.ok(da[k.start[i].y * k.breite + k.start[i].x], 'Startplatz ' + i + ' nicht erreichbar');
   }
 });
+
+test('Faellt die Bruecke, kommt das Fussvolk ans Ufer', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  let platz = null;
+  for (let y = 3; y < k.hoehe - 3 && !platz; y++) {
+    for (let x = 3; x < k.breite - 3; x++) {
+      if (sim.bauplatzFrei(0, 'bruecke', x, y)) { platz = [x, y]; break; }
+    }
+  }
+  assert.ok(platz, 'kein Brueckenplatz gefunden');
+  const bruecke = sim.gebaeudeSetzen(0, 'bruecke', platz[0], platz[1], true);
+  const e = sim.einheitSetzen(0, 'dorfbewohner', platz[0] * FP + FP / 2, platz[1] * FP + FP / 2);
+  assert.equal(sim.sperre[platz[1] * k.breite + platz[0]], 0, 'Bruecke war nicht begehbar');
+
+  sim.gebaeudeWeg(bruecke, null);
+  assert.ok(e.tot || sim.sperre[sim.ky(e) * k.breite + sim.kx(e)] === 0,
+    'Einheit steht nach dem Abriss auf gesperrtem Grund');
+  if (!e.tot) {
+    /* Und sie kann sich auch wirklich wieder bewegen. */
+    const vorX = e.x, vorY = e.y;
+    sim.befehlSetzen(e, { art: 'gehen', x: (platz[0] + 6) * FP, y: platz[1] * FP });
+    for (let t = 0; t < 600; t++) sim.takten();
+    assert.ok(e.x !== vorX || e.y !== vorY, 'Einheit steckt im Wasser fest');
+  }
+});
+
+test('Auf ein Schiff wird keine Bruecke gebaut', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  let platz = null;
+  for (let y = 3; y < k.hoehe - 3 && !platz; y++) {
+    for (let x = 3; x < k.breite - 3; x++) {
+      if (sim.bauplatzFrei(0, 'bruecke', x, y)) { platz = [x, y]; break; }
+    }
+  }
+  sim.einheitSetzen(0, 'galeere', platz[0] * FP + FP / 2, platz[1] * FP + FP / 2);
+  assert.equal(sim.bauplatzFrei(0, 'bruecke', platz[0], platz[1]), false,
+    'Bruecke darf nicht ueber einem Schiff entstehen');
+});
+
+test('Galeere versenkt Galeere und beschiesst das Ufer', () => {
+  const sim = wasserSim();
+  const k = sim.karte;
+  for (const p of sim.spieler) { p.erkundet.fill(1); p.zeitalter = 3; }
+  let a = null;
+  for (let y = 2; y < k.hoehe - 2 && !a; y++) {
+    for (let x = 2; x < k.breite - 6; x++) {
+      if (sim.sperreWasser[y * k.breite + x] !== 0) continue;
+      if (sim.sperreWasser[y * k.breite + x + 3] !== 0) continue;
+      if (sim.revier(x, y) !== sim.revier(x + 3, y)) continue;
+      a = [x, y]; break;
+    }
+  }
+  assert.ok(a, 'keine zwei freien Wasserfelder gefunden');
+  const g1 = sim.einheitSetzen(0, 'galeere', a[0] * FP + FP / 2, a[1] * FP + FP / 2);
+  const g2 = sim.einheitSetzen(1, 'galeere', (a[0] + 3) * FP + FP / 2, a[1] * FP + FP / 2);
+  for (let t = 0; t < 2000 && !g1.tot && !g2.tot; t++) sim.takten();
+  assert.ok(g1.tot || g2.tot, 'Galeeren beschiessen einander nicht');
+});
+
+test('Ein Dorfbewohner jagt keinem unerreichbaren Ziel nach', () => {
+  /* Der Fall aus dem Dauerlauf: ein feindlicher Spaeher jenseits des
+     Wassers. Ohne Abbruch stand die ganze Wirtschaft still, weil die
+     Dorfbewohner ewig auf einen Weg warteten, den es nicht gibt. */
+  const sim = wasserSim();
+  const k = sim.karte;
+  for (const p of sim.spieler) p.erkundet.fill(1);
+
+  /* Eine Landkachel suchen, die von einer zweiten durch Wasser
+     getrennt ist — also in einem anderen Landstueck liegt. */
+  const erreichbar = (sx, sy) => {
+    const da = new Uint8Array(k.breite * k.hoehe);
+    const stapel = [sy * k.breite + sx];
+    da[stapel[0]] = 1;
+    while (stapel.length) {
+      const i = stapel.pop();
+      const x = i % k.breite, y = (i / k.breite) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= k.breite || ny >= k.hoehe) continue;
+        const j = ny * k.breite + nx;
+        if (da[j] || sim.sperre[j] === GESPERRT) continue;
+        da[j] = 1; stapel.push(j);
+      }
+    }
+    return da;
+  };
+  let heim = null;
+  for (let i = 0; i < k.breite * k.hoehe && !heim; i++) {
+    if (sim.sperre[i] === 0) heim = [i % k.breite, (i / k.breite) | 0];
+  }
+  const da = erreichbar(heim[0], heim[1]);
+  let fern = null;
+  for (let i = 0; i < k.breite * k.hoehe && !fern; i++) {
+    if (sim.sperre[i] === 0 && !da[i]) fern = [i % k.breite, (i / k.breite) | 0];
+  }
+  assert.ok(fern, 'keine zwei getrennten Landstuecke gefunden');
+
+  const dorf = sim.einheitSetzen(0, 'dorfbewohner', heim[0] * FP + FP / 2, heim[1] * FP + FP / 2);
+  const feind = sim.einheitSetzen(1, 'spaeher', fern[0] * FP + FP / 2, fern[1] * FP + FP / 2);
+  sim.befehlSetzen(dorf, { art: 'angriff', ziel: feind.id });
+  assert.equal(dorf.zustand, ZUSTAND.angreifen, 'Angriffsbefehl nicht angenommen');
+
+  for (let t = 0; t < 400; t++) sim.takten();
+  assert.notEqual(dorf.zustand, ZUSTAND.angreifen,
+    'Dorfbewohner haengt weiter an einem Ziel, zu dem kein Weg fuehrt');
+  assert.ok(!dorf.wartetAufWeg || dorf.pfad,
+    'Dorfbewohner bestellt endlos neue Wegsuchen');
+});

@@ -100,6 +100,9 @@ export class Hud {
         if (w.reichweite >= 1) werte += ` · Reichweite ${w.reichweite}`;
         werte += ` · Ruestung ${w.ruestungNah}/${w.ruestungFern}`;
         if (erstes.ladung) werte += ` · traegt ${erstes.ladung} ${ROHSTOFF_NAME[erstes.ladungArt]}`;
+        if (EINHEITEN[erstes.typ].plaetze) {
+          werte += ` · an Bord ${erstes.fracht ? erstes.fracht.length : 0}/${EINHEITEN[erstes.typ].plaetze}`;
+        }
       } else {
         const def = GEBAEUDE[erstes.typ];
         if (!erstes.fertig) werte += ` · im Bau ${Math.round(erstes.bauFortschritt * 100 / erstes.bauGesamt)} %`;
@@ -264,6 +267,16 @@ export class Hud {
     /* Soldaten: Haltung und Anhalten */
     if (einheiten.length) {
       const ids = einheiten.map(o => o.id);
+      /* Beladene Transporter zuerst: von Bord gehen ist der Befehl,
+         den man an einem vollen Schiff am haeufigsten braucht. */
+      const frachter = einheiten.filter(o => o.fracht && o.fracht.length);
+      if (frachter.length) {
+        const anBord = frachter.reduce((n, o) => n + o.fracht.length, 0);
+        knopf({ name: 'Von Bord (' + anBord + ')', taste: 'X', form: 'einheit',
+          titel: 'Setzt die Fracht am naechsten Ufer ab. Fuer eine bestimmte Stelle'
+               + ' stattdessen mit der rechten Maustaste an Land klicken.',
+          tun: () => this.spiel.senden({ a: 'ausladen', ids: frachter.map(o => o.id) }) });
+      }
       knopf({ name: 'Anhalten', taste: 'S', form: 'einheit', tun: () => this.spiel.senden({ a: 'stopp', ids }) });
       const haltungen = [['Angriffslustig', 0], ['Verteidigend', 1], ['Stellung halten', 2], ['Zurueckhaltend', 3]];
       for (const [name, h] of haltungen) {

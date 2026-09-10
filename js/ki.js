@@ -663,13 +663,26 @@ function militaer(sim, p, z) {
       /* Ohne Soldaten greifen notgedrungen die Dorfbewohner zur Axt —
          aber nur, wenn der Feind wirklich vor der Tuer steht. */
       const nah = abstand2(eindringling.x, eindringling.y, tc.x, tc.y) < (9 * FP) * (9 * FP);
-      if (armee.length < 2 && nah) {
+      /* Nach einem Aufgebot ist erst einmal Ruhe. Ohne diese Sperre
+         ruft die KI ihre Dorfbewohner bei jedem Durchlauf neu zu den
+         Waffen, sobald ein Feind in Sichtweite kreist — und wenn er
+         gar nicht erreichbar ist (jenseits eines Sees etwa), steht die
+         Wirtschaft dauerhaft still. */
+      if (armee.length < 2 && nah && sim.takt >= (z.dorfKampfSperre || 0)) {
         const dorf = meineEinheiten(sim, p, e => sim.werte(p.id, e.typ).kannSammeln)
           .filter(e => abstand2(e.x, e.y, tc.x, tc.y) < (12 * FP) * (12 * FP)).slice(0, 6);
         if (dorf.length) {
           befehl(sim, p, { a: 'angriff', ids: dorf.map(e => e.id), ziel: eindringling.id });
           z.dorfKampf = dorf.map(e => e.id);
+          z.dorfKampfSperre = sim.takt + 900;
         }
+      } else if (z.dorfKampf) {
+        /* Der Feind ist noch in Sicht, aber nicht mehr vor der Tuer:
+           dann haben die Dorfbewohner am Erz mehr Wert als am Feind.
+           Erst wenn gar kein Eindringling mehr da ist abzuraeumen war
+           zu spaet — der Spaeher kreiste einfach in Sichtweite weiter. */
+        befehl(sim, p, { a: 'stopp', ids: z.dorfKampf });
+        z.dorfKampf = null;
       }
       return;
     }
